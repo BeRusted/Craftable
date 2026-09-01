@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "id": "craftable",
+  "version": "${version}",
+  "name": "Craftable",
+  "description": "",
+  "authors": ["BeRusted"],
+  "contact": {
+    "homepage": "https://modrinth.com/mod/craftable-mod",
+    "source": "https://github.com/BeRusted/Craftable",
+    "issues": "https://github.com/BeRusted/Craftable/issues"
+  },
+  "license": "MIT",
+  "icon": "assets/craftable/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-datagen": [
+      "org.berusted.craftable.client.CraftableDataGenerator"
+    ],
+    "client": [
+      "org.berusted.craftable.client.CraftableClient"
+    ],
+    "main": [
+      "org.berusted.craftable.Craftable"
+    ]
+  },
+  "mixins": [
+    "craftable.mixins.json",
+    {
+      "config": "craftable.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  },
+  "custom": {
+    "modmenu": {
+      "links": {
+        "modmenu.source": "https://github.com/BeRusted/Craftable"
+      },
+      "update_checker": false
+    }
+  }
+}
