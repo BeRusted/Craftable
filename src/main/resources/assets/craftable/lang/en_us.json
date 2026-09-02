@@ -1,1 +1,20 @@
-{}
+{
+  "key.categories.craftable": "Craftable",
+  "key.craftable.create_one": "Create One",
+  "key.craftable.undo_last": "Undo Last Craft",
+  "status.craftable.craftable": "Craftable",
+  "status.craftable.partial": "Partially craftable",
+  "status.craftable.blocked": "Not craftable",
+  "tooltip.craftable.status": "Craftable: %s",
+  "tooltip.craftable.create_one": "Press C to create one",
+  "message.craftable.create.created": "Created one item.",
+  "message.craftable.create.recipe_not_found": "Crafting failed: the server could not find that recipe.",
+  "message.craftable.create.unsupported_recipe": "Crafting failed: that recipe is outside the current prototype.",
+  "message.craftable.create.missing_workstation": "Crafting failed: a required crafting table is not nearby.",
+  "message.craftable.create.missing_ingredients": "Crafting failed: the work environment lacks ingredients.",
+  "message.craftable.create.no_output_space": "Crafting failed: there is no room for the output.",
+  "message.craftable.create.environment_changed": "Crafting cancelled: the work environment changed; try again.",
+  "message.craftable.create.invalid_context": "Crafting failed: use this action from the player inventory recipe book.",
+  "message.craftable.create.request_throttled": "That was too fast; try again in a moment.",
+  "message.craftable.create.internal_error": "Crafting failed: the transaction errored and materials were restored."
+}

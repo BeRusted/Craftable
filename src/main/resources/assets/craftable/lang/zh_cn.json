@@ -1,1 +1,20 @@
-{}
+{
+  "key.categories.craftable": "Craftable",
+  "key.craftable.create_one": "制作一个",
+  "key.craftable.undo_last": "撤销上次制作",
+  "status.craftable.craftable": "可合成",
+  "status.craftable.partial": "部分可合成",
+  "status.craftable.blocked": "不可合成",
+  "tooltip.craftable.status": "Craftable：%s",
+  "tooltip.craftable.create_one": "按 C 制作一个",
+  "message.craftable.create.created": "已制作一个物品。",
+  "message.craftable.create.recipe_not_found": "制作失败：服务端找不到该配方。",
+  "message.craftable.create.unsupported_recipe": "制作失败：该配方尚未纳入当前原型。",
+  "message.craftable.create.missing_workstation": "制作失败：附近缺少所需工作台。",
+  "message.craftable.create.missing_ingredients": "制作失败：工作环境中的材料不足。",
+  "message.craftable.create.no_output_space": "制作失败：背包没有足够的输出空间。",
+  "message.craftable.create.environment_changed": "制作取消：工作环境已经变化，请重试。",
+  "message.craftable.create.invalid_context": "制作失败：请在玩家背包的配方书中使用此操作。",
+  "message.craftable.create.request_throttled": "操作过快，请稍后重试。",
+  "message.craftable.create.internal_error": "制作失败：事务发生内部错误，材料已回滚。"
+}
