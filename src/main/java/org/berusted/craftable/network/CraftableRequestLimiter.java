@@ -19,6 +19,11 @@ final class CraftableRequestLimiter {
         return allow(LAST_CREATE_REQUEST, playerId, gameTime, 1);
     }
 
+    static void clear(UUID playerId) {
+        LAST_STATUS_REQUEST.remove(playerId);
+        LAST_CREATE_REQUEST.remove(playerId);
+    }
+
     private static boolean allow(Map<UUID, Long> requests, UUID playerId, long gameTime, long interval) {
         Long previous = requests.get(playerId);
         if (previous != null && gameTime >= previous && gameTime - previous < interval) {

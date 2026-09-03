@@ -6,7 +6,7 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
  * Owns the protocol version and all Craftable payload registrations.
  */
 public final class CraftablePayloads {
-    public static final String PROTOCOL_VERSION = "1";
+    public static final String PROTOCOL_VERSION = "2";
 
     private CraftablePayloads() {}
 

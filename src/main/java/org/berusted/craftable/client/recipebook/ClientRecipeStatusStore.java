@@ -23,16 +23,23 @@ public final class ClientRecipeStatusStore {
 
     public static void put(
             ResourceLocation recipeId,
+            long requestId,
             CraftingStatus status,
             CraftingResultCode resultCode,
-            long newGeneration) {
+            long newGeneration,
+            long receivedAtGameTime) {
+        StatusEntry current = STATUSES.get(recipeId);
+        if (current != null && requestId < current.requestId()) {
+            return;
+        }
         generation = Math.max(generation, newGeneration);
-        STATUSES.put(recipeId, new StatusEntry(status, resultCode, newGeneration));
+        STATUSES.put(recipeId, new StatusEntry(
+                status, resultCode, newGeneration, requestId, receivedAtGameTime));
     }
 
     public static boolean isFresh(ResourceLocation recipeId, long gameTime, long maximumAge) {
         StatusEntry entry = STATUSES.get(recipeId);
-        long age = entry == null ? Long.MAX_VALUE : gameTime - entry.generation();
+        long age = entry == null ? Long.MAX_VALUE : gameTime - entry.receivedAtGameTime();
         return age >= 0 && age <= maximumAge;
     }
 
@@ -45,5 +52,10 @@ public final class ClientRecipeStatusStore {
         return generation;
     }
 
-    private record StatusEntry(CraftingStatus status, CraftingResultCode resultCode, long generation) {}
+    private record StatusEntry(
+            CraftingStatus status,
+            CraftingResultCode resultCode,
+            long environmentGeneration,
+            long requestId,
+            long receivedAtGameTime) {}
 }

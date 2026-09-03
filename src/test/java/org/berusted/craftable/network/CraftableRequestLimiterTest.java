@@ -23,4 +23,16 @@ class CraftableRequestLimiterTest {
         assertTrue(CraftableRequestLimiter.allowCreate(player, 100));
         assertTrue(CraftableRequestLimiter.allowCreate(player, 5));
     }
+
+    @Test
+    void clearingAPlayerReleasesBothLimits() {
+        UUID player = UUID.randomUUID();
+        assertTrue(CraftableRequestLimiter.allowStatus(player, 100));
+        assertTrue(CraftableRequestLimiter.allowCreate(player, 100));
+
+        CraftableRequestLimiter.clear(player);
+
+        assertTrue(CraftableRequestLimiter.allowStatus(player, 100));
+        assertTrue(CraftableRequestLimiter.allowCreate(player, 100));
+    }
 }

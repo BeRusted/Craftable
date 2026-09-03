@@ -8,6 +8,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import org.berusted.craftable.api.CraftingStatus;
 import org.berusted.craftable.client.recipebook.ClientRecipeStatusStore;
+import org.berusted.craftable.config.CraftableClientConfig;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -23,6 +24,9 @@ public abstract class RecipeButtonMixin extends AbstractWidget {
     @Inject(method = "renderWidget", at = @At("TAIL"))
     private void craftable$renderStatus(
             GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick, CallbackInfo callback) {
+        if (!CraftableClientConfig.recipeBookEnhancementsEnabled()) {
+            return;
+        }
         RecipeButton self = (RecipeButton) (Object) this;
         CraftingStatus status = craftable$status(self);
         guiGraphics.renderOutline(getX(), getY(), getWidth(), getHeight(), craftable$color(status));
@@ -30,6 +34,9 @@ public abstract class RecipeButtonMixin extends AbstractWidget {
 
     @Inject(method = "getTooltipText", at = @At("RETURN"))
     private void craftable$appendStatus(CallbackInfoReturnable<List<Component>> callback) {
+        if (!CraftableClientConfig.recipeBookEnhancementsEnabled()) {
+            return;
+        }
         RecipeButton self = (RecipeButton) (Object) this;
         CraftingStatus status = craftable$status(self);
         callback.getReturnValue().add(Component.translatable("tooltip.craftable.status", Component.translatable(

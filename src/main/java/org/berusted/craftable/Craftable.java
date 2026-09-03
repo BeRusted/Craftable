@@ -4,7 +4,10 @@ import com.mojang.logging.LogUtils;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.config.ModConfig;
 import net.minecraft.resources.ResourceLocation;
+import org.berusted.craftable.config.CraftableClientConfig;
+import org.berusted.craftable.config.CraftableServerConfig;
 import org.berusted.craftable.network.CraftablePayloads;
 import org.slf4j.Logger;
 
@@ -14,6 +17,8 @@ public final class Craftable {
     public static final Logger LOGGER = LogUtils.getLogger();
 
     public Craftable(IEventBus modEventBus, ModContainer modContainer) {
+        modContainer.registerConfig(ModConfig.Type.SERVER, CraftableServerConfig.SPEC);
+        modContainer.registerConfig(ModConfig.Type.CLIENT, CraftableClientConfig.SPEC);
         modEventBus.addListener(CraftablePayloads::register);
     }
 

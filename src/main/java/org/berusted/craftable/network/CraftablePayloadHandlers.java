@@ -3,8 +3,8 @@ package org.berusted.craftable.network;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import org.berusted.craftable.api.CraftingResultCode;
-import org.berusted.craftable.environment.EnvironmentScanner;
 import org.berusted.craftable.environment.EnvironmentSnapshot;
+import org.berusted.craftable.environment.EnvironmentSnapshotService;
 import org.berusted.craftable.execution.DirectCraftingEvaluation;
 import org.berusted.craftable.execution.DirectCraftingService;
 
@@ -16,13 +16,20 @@ public final class CraftablePayloadHandlers {
             if (!(context.player() instanceof ServerPlayer player)) {
                 return;
             }
+            if (payload.requestId() < 0) {
+                return;
+            }
             if (!CraftableRequestLimiter.allowStatus(player.getUUID(), player.serverLevel().getGameTime())) {
                 return;
             }
-            EnvironmentSnapshot snapshot = EnvironmentScanner.scan(player);
+            EnvironmentSnapshot snapshot = EnvironmentSnapshotService.preview(player);
             DirectCraftingEvaluation evaluation = DirectCraftingService.evaluate(player, payload.recipeId(), snapshot);
             context.reply(new RecipeStatusResponsePayload(
-                    payload.recipeId(), evaluation.status(), evaluation.resultCode(), snapshot.generation()));
+                    payload.recipeId(),
+                    payload.requestId(),
+                    evaluation.status(),
+                    evaluation.resultCode(),
+                    snapshot.generation()));
         });
     }
 
@@ -31,13 +38,16 @@ public final class CraftablePayloadHandlers {
             if (!(context.player() instanceof ServerPlayer player)) {
                 return;
             }
+            if (payload.requestId() < 0) {
+                return;
+            }
             if (!CraftableRequestLimiter.allowCreate(player.getUUID(), player.serverLevel().getGameTime())) {
                 context.reply(new CreateRecipeResultPayload(
-                        payload.recipeId(), CraftingResultCode.REQUEST_THROTTLED));
+                        payload.recipeId(), payload.requestId(), CraftingResultCode.REQUEST_THROTTLED));
                 return;
             }
             CraftingResultCode result = DirectCraftingService.createOne(player, payload.recipeId());
-            context.reply(new CreateRecipeResultPayload(payload.recipeId(), result));
+            context.reply(new CreateRecipeResultPayload(payload.recipeId(), payload.requestId(), result));
         });
     }
 

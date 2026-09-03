@@ -15,8 +15,10 @@ import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.berusted.craftable.Craftable;
 import org.berusted.craftable.client.CraftableKeyMappings;
+import org.berusted.craftable.client.ClientRequestSequence;
 import org.berusted.craftable.client.mixin.RecipeBookComponentAccessor;
 import org.berusted.craftable.client.mixin.RecipeBookPageAccessor;
+import org.berusted.craftable.config.CraftableClientConfig;
 import org.berusted.craftable.network.CreateRecipeRequestPayload;
 
 @EventBusSubscriber(modid = Craftable.MOD_ID, value = Dist.CLIENT)
@@ -25,6 +27,9 @@ public final class RecipeBookInputHandler {
 
     @SubscribeEvent
     public static void onKeyPressed(ScreenEvent.KeyPressed.Pre event) {
+        if (!CraftableClientConfig.recipeBookEnhancementsEnabled()) {
+            return;
+        }
         if (!(event.getScreen() instanceof InventoryScreen inventoryScreen)) {
             return;
         }
@@ -57,7 +62,8 @@ public final class RecipeBookInputHandler {
         }
 
         RecipeHolder<?> recipe = hoveredButton.getRecipe();
-        PacketDistributor.sendToServer(new CreateRecipeRequestPayload(recipe.id()));
+        PacketDistributor.sendToServer(new CreateRecipeRequestPayload(
+                recipe.id(), ClientRequestSequence.next()));
         event.setCanceled(true);
     }
 }

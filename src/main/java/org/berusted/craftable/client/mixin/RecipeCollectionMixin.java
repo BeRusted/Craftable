@@ -6,6 +6,7 @@ import net.minecraft.client.gui.screens.recipebook.RecipeCollection;
 import net.minecraft.stats.RecipeBook;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import org.berusted.craftable.client.recipebook.ClientWorkstationProbe;
+import org.berusted.craftable.config.CraftableClientConfig;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
@@ -17,7 +18,7 @@ public abstract class RecipeCollectionMixin {
             method = {"updateKnownRecipes", "canCraft"},
             at = @At(value = "INVOKE", target = "Lnet/minecraft/stats/RecipeBook;contains(Lnet/minecraft/world/item/crafting/RecipeHolder;)Z"))
     private boolean craftable$showWithoutMutatingUnlocks(RecipeBook book, RecipeHolder<?> recipe) {
-        return true;
+        return CraftableClientConfig.recipeBookEnhancementsEnabled() || book.contains(recipe);
     }
 
     @ModifyVariable(method = "canCraft", at = @At("HEAD"), argsOnly = true, ordinal = 0)
@@ -31,7 +32,8 @@ public abstract class RecipeCollectionMixin {
     }
 
     private static boolean craftable$hasAmbientCraftingTable() {
-        return Minecraft.getInstance().screen instanceof InventoryScreen
+        return CraftableClientConfig.recipeBookEnhancementsEnabled()
+                && Minecraft.getInstance().screen instanceof InventoryScreen
                 && ClientWorkstationProbe.hasNearbyCraftingTable();
     }
 }

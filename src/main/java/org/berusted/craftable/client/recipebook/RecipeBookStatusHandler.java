@@ -12,8 +12,10 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.berusted.craftable.Craftable;
+import org.berusted.craftable.client.ClientRequestSequence;
 import org.berusted.craftable.client.mixin.RecipeBookComponentAccessor;
 import org.berusted.craftable.client.mixin.RecipeBookPageAccessor;
+import org.berusted.craftable.config.CraftableClientConfig;
 import org.berusted.craftable.network.RecipeStatusRequestPayload;
 
 /** Requests authoritative status only for the recipe the player is inspecting. */
@@ -27,6 +29,9 @@ public final class RecipeBookStatusHandler {
 
     @SubscribeEvent
     public static void onRender(ScreenEvent.Render.Post event) {
+        if (!CraftableClientConfig.recipeBookEnhancementsEnabled()) {
+            return;
+        }
         if (!(event.getScreen() instanceof InventoryScreen inventoryScreen)) {
             return;
         }
@@ -54,6 +59,12 @@ public final class RecipeBookStatusHandler {
 
         lastRequestedRecipe = recipeId;
         lastRequestGameTime = gameTime;
-        PacketDistributor.sendToServer(new RecipeStatusRequestPayload(recipeId));
+        PacketDistributor.sendToServer(new RecipeStatusRequestPayload(
+                recipeId, ClientRequestSequence.next()));
+    }
+
+    public static void clearRequestState() {
+        lastRequestedRecipe = null;
+        lastRequestGameTime = Long.MIN_VALUE;
     }
 }

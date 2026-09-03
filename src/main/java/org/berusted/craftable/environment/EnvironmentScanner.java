@@ -6,11 +6,13 @@ import java.util.List;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
+import net.minecraft.world.LockCode;
 import net.minecraft.world.entity.monster.Shulker;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -23,19 +25,22 @@ import net.minecraft.world.level.block.entity.RandomizableContainerBlockEntity;
 import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.ChestType;
+import org.berusted.craftable.config.EnvironmentScanSettings;
+import org.berusted.craftable.workstation.WorkstationCapability;
+import org.berusted.craftable.workstation.WorkstationEndpoint;
 
-/** Discovers the deliberately small, vanilla-first M0.2 work environment. */
-public final class EnvironmentScanner {
-    public static final int HORIZONTAL_RADIUS = 8;
-    public static final int VERTICAL_RADIUS = 4;
+/** Performs one bounded, vanilla-only world scan for {@link EnvironmentSnapshotService}. */
+final class EnvironmentScanner {
     private static final String VANILLA_NAMESPACE = "minecraft";
 
     private EnvironmentScanner() {}
 
-    public static EnvironmentSnapshot scan(ServerPlayer player) {
+    static EnvironmentSnapshot scan(
+            ServerPlayer player, EnvironmentScanSettings settings, long generation) {
         ServerLevel level = player.serverLevel();
         BlockPos origin = player.blockPosition();
         List<ContainerEndpoint> endpoints = new ArrayList<>();
+        List<WorkstationEndpoint> workstations = new ArrayList<>();
         endpoints.add(new ContainerEndpoint(
                 "player:" + player.getUUID() + ":inventory",
                 EndpointKind.PLAYER,
@@ -43,14 +48,19 @@ public final class EnvironmentScanner {
                 player.getInventory(),
                 0,
                 36));
+        workstations.add(new WorkstationEndpoint(
+                "player:" + player.getUUID() + ":crafting_2x2",
+                WorkstationCapability.CRAFTING_2X2,
+                null));
 
-        boolean craftingTableAvailable = false;
         boolean enderChestAvailable = false;
         BlockPos enderChestPosition = null;
         Set<BlockPos> scannedChests = new HashSet<>();
 
-        BlockPos min = origin.offset(-HORIZONTAL_RADIUS, -VERTICAL_RADIUS, -HORIZONTAL_RADIUS);
-        BlockPos max = origin.offset(HORIZONTAL_RADIUS, VERTICAL_RADIUS, HORIZONTAL_RADIUS);
+        int horizontalRadius = settings.horizontalRadius();
+        int verticalRadius = settings.verticalRadius();
+        BlockPos min = origin.offset(-horizontalRadius, -verticalRadius, -horizontalRadius);
+        BlockPos max = origin.offset(horizontalRadius, verticalRadius, horizontalRadius);
         for (BlockPos mutablePos : BlockPos.betweenClosed(min, max)) {
             int sectionX = SectionPos.blockToSectionCoord(mutablePos.getX());
             int sectionZ = SectionPos.blockToSectionCoord(mutablePos.getZ());
@@ -62,12 +72,15 @@ public final class EnvironmentScanner {
             BlockState state = level.getBlockState(pos);
             Block block = state.getBlock();
             if (block == Blocks.CRAFTING_TABLE) {
-                craftingTableAvailable = true;
+                workstations.add(new WorkstationEndpoint(
+                        workstationEndpointId(level, pos, WorkstationCapability.CRAFTING_3X3),
+                        WorkstationCapability.CRAFTING_3X3,
+                        pos));
             }
 
-            if (block instanceof EnderChestBlock) {
+            if (settings.includeEnderChest() && block instanceof EnderChestBlock) {
                 BlockPos above = pos.above();
-                if (!level.getBlockState(above).isRedstoneConductor(level, above)) {
+                if (!enderChestAvailable && !level.getBlockState(above).isRedstoneConductor(level, above)) {
                     enderChestAvailable = true;
                     enderChestPosition = pos;
                 }
@@ -92,7 +105,7 @@ public final class EnvironmentScanner {
             BlockEntity blockEntity = level.getBlockEntity(pos);
             if (!(blockEntity instanceof Container container)
                     || hasUnresolvedLoot(blockEntity)
-                    || !canOpen(player, blockEntity)
+                    || !canOpenWithoutSideEffects(player, blockEntity)
                     || !hasPhysicalAccess(level, pos, state, blockEntity)
                     || !container.stillValid(player)) {
                 continue;
@@ -118,7 +131,14 @@ public final class EnvironmentScanner {
                     enderInventory.getContainerSize()));
         }
 
-        return new EnvironmentSnapshot(origin, level.getGameTime(), craftingTableAvailable, endpoints);
+        return new EnvironmentSnapshot(
+                level.dimension(),
+                origin,
+                settings,
+                level.getGameTime(),
+                generation,
+                endpoints,
+                workstations);
     }
 
     private static void addChest(
@@ -142,14 +162,19 @@ public final class EnvironmentScanner {
         }
 
         BlockEntity first = level.getBlockEntity(pos);
-        if (hasUnresolvedLoot(first) || !canOpen(player, first)) {
+        if (hasUnresolvedLoot(first) || !canOpenWithoutSideEffects(player, first)) {
             return;
         }
 
         if (type != ChestType.SINGLE) {
             BlockPos partnerPos = pos.relative(ChestBlock.getConnectedDirection(state));
+            int partnerSectionX = SectionPos.blockToSectionCoord(partnerPos.getX());
+            int partnerSectionZ = SectionPos.blockToSectionCoord(partnerPos.getZ());
+            if (!level.hasChunk(partnerSectionX, partnerSectionZ)) {
+                return;
+            }
             BlockEntity partner = level.getBlockEntity(partnerPos);
-            if (hasUnresolvedLoot(partner) || !canOpen(player, partner)) {
+            if (hasUnresolvedLoot(partner) || !canOpenWithoutSideEffects(player, partner)) {
                 return;
             }
         }
@@ -173,9 +198,16 @@ public final class EnvironmentScanner {
                 && randomizable.getLootTable() != null;
     }
 
-    private static boolean canOpen(ServerPlayer player, BlockEntity blockEntity) {
-        return !(blockEntity instanceof BaseContainerBlockEntity baseContainer)
-                || baseContainer.canOpen(player);
+    private static boolean canOpenWithoutSideEffects(ServerPlayer player, BlockEntity blockEntity) {
+        if (!(blockEntity instanceof BaseContainerBlockEntity baseContainer)) {
+            return true;
+        }
+
+        // BaseContainerBlockEntity.canOpen sends a message and plays a sound when locked.
+        // A background preview scan must be observational, so read the public component
+        // snapshot and perform the same key comparison without invoking those effects.
+        LockCode lock = baseContainer.collectComponents().getOrDefault(DataComponents.LOCK, LockCode.NO_LOCK);
+        return player.isSpectator() || lock.unlocksWith(player.getMainHandItem());
     }
 
     private static boolean hasPhysicalAccess(
@@ -193,5 +225,12 @@ public final class EnvironmentScanner {
 
     private static String blockEndpointId(ServerLevel level, BlockPos pos) {
         return "block:" + level.dimension().location() + ":" + pos.getX() + "," + pos.getY() + "," + pos.getZ();
+    }
+
+    private static String workstationEndpointId(
+            ServerLevel level, BlockPos pos, WorkstationCapability capability) {
+        return "workstation:" + level.dimension().location() + ":"
+                + pos.getX() + "," + pos.getY() + "," + pos.getZ() + ":"
+                + capability.name().toLowerCase(java.util.Locale.ROOT);
     }
 }

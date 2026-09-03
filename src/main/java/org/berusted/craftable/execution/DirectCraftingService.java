@@ -20,8 +20,9 @@ import org.berusted.craftable.Craftable;
 import org.berusted.craftable.api.CraftingResultCode;
 import org.berusted.craftable.environment.ContainerEndpoint;
 import org.berusted.craftable.environment.EndpointKind;
-import org.berusted.craftable.environment.EnvironmentScanner;
 import org.berusted.craftable.environment.EnvironmentSnapshot;
+import org.berusted.craftable.environment.EnvironmentSnapshotService;
+import org.berusted.craftable.workstation.WorkstationCapability;
 
 /**
  * Server-authoritative direct crafting for ordinary shaped/shapeless vanilla
@@ -31,7 +32,7 @@ public final class DirectCraftingService {
     private DirectCraftingService() {}
 
     public static DirectCraftingEvaluation evaluate(ServerPlayer player, ResourceLocation recipeId) {
-        return evaluate(player, recipeId, EnvironmentScanner.scan(player));
+        return evaluate(player, recipeId, EnvironmentSnapshotService.preview(player));
     }
 
     public static DirectCraftingEvaluation evaluate(
@@ -51,7 +52,8 @@ public final class DirectCraftingService {
                 && recipe.getSerializer() != RecipeSerializer.SHAPELESS_RECIPE) {
             return DirectCraftingEvaluation.blocked(CraftingResultCode.UNSUPPORTED_RECIPE);
         }
-        if (!recipe.canCraftInDimensions(2, 2) && !snapshot.craftingTableAvailable()) {
+        if (!recipe.canCraftInDimensions(2, 2)
+                && !snapshot.supports(WorkstationCapability.CRAFTING_3X3)) {
             return DirectCraftingEvaluation.blocked(CraftingResultCode.MISSING_WORKSTATION);
         }
 
@@ -102,7 +104,21 @@ public final class DirectCraftingService {
     }
 
     public static CraftingResultCode createOne(ServerPlayer player, ResourceLocation recipeId) {
-        DirectCraftingEvaluation evaluation = evaluate(player, recipeId);
+        // Preview snapshots are deliberately forbidden here: the transaction must
+        // start from a new world observation even if the same recipe was just hovered.
+        EnvironmentSnapshot snapshot = EnvironmentSnapshotService.fresh(player);
+        try {
+            return createOne(player, recipeId, snapshot);
+        } finally {
+            // Any create attempt may have observed or changed resources. Force the
+            // next preview to obtain a new generation instead of reusing this view.
+            EnvironmentSnapshotService.invalidate(player.getUUID());
+        }
+    }
+
+    private static CraftingResultCode createOne(
+            ServerPlayer player, ResourceLocation recipeId, EnvironmentSnapshot snapshot) {
+        DirectCraftingEvaluation evaluation = evaluate(player, recipeId, snapshot);
         DirectCraftingPlan plan = evaluation.plan().orElse(null);
         if (plan == null) {
             return evaluation.resultCode();
