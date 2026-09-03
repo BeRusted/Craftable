@@ -8,7 +8,7 @@
 
 Craftable 不增加存储网络、新方块、科技树或资源体系。它把玩家、附近可合法使用的容器与工作站组织成一个临时工作环境，并在服务端安全地规划、执行和解释合成操作。
 
-当前仓库已完成 M0.1 初始化和 M0.2 纯原版技术原型验收：服务端原版容器扫描、配方状态请求和单次直接合成事务已经落地；原版配方书集成已验证可行，同时确认了环境状态筛选、独立配方可见性和实体 3×3 菜单三个必须在正式实现中解决的边界。目标版本为 Minecraft `1.21.1`、NeoForge `21.1.235`、Java 21。
+当前仓库已完成 M0.1、M0.2 和 M1，M1.1 修复与规划也已实现：纯原版工作环境现在具有服务端配置、稳定资源/工作站端点、按玩家短缓存、单调环境世代、结构化请求序号和受限调试命令；手动测试收口修复了环境命令翻译参数，并接入原版风格失败 Toast 与 NeoForge 内置配置页。原版配方书原型仍保留 M0.2 验收中确认的显示缺口，统一状态与实体 3×3 菜单将在 M3 正式解决。目标版本为 Minecraft `1.21.1`、NeoForge `21.1.235`、Java 21。
 
 项目标识：
 
@@ -28,7 +28,11 @@ Craftable 不增加存储网络、新方块、科技树或资源体系。它把�
 - [测试与风险](docs/05-testing-and-risks.md)：测试矩阵、性能预算和风险登记。
 - [M0.2 原型说明](docs/06-m0.2-prototype-notes.md)：当前实现边界、明确限制和客户端验收矩阵。
 - [M0.2 验收报告](docs/07-m0.2-acceptance.md)：实际游戏测试结果、根因、参考实现评估和后续约束。
+- [M1 严格实施计划](docs/08-m1-implementation-plan.md)：范围预算、依赖方向、不变量和防漂移规则。
+- [M1 验收报告](docs/09-m1-acceptance.md)：落地契约、验证结果和留给 M2/M3 的边界。
 - [ADR-0001：使用原版配方书作为默认前端](docs/adr/0001-vanilla-recipe-book-frontend.md)：记录原版配方书与 JEI 并存的架构决策。
+- [ADR-0002：环境快照是短期服务端契约](docs/adr/0002-m1-environment-snapshot-contract.md)：记录缓存、世代和强制刷新决策。
+- [ADR-0003：原版式反馈与设置入口](docs/adr/0003-vanilla-feedback-and-settings-surfaces.md)：记录通知分流、配置界面和客户端/世界规则边界。
 
 ## 已确定的方向
 
@@ -45,5 +49,6 @@ Craftable 不增加存储网络、新方块、科技树或资源体系。它把�
 - [NeoForge 1.21.1 Networking](https://docs.neoforged.net/docs/1.21.1/networking/)
 - [NeoForge 1.21.1 Menus](https://docs.neoforged.net/docs/1.21.1/gui/menus/)
 - [NeoForge 1.21.1 Screens](https://docs.neoforged.net/docs/1.21.1/gui/screens/)
+- [NeoForge 1.21.1 Configuration](https://docs.neoforged.net/docs/1.21.1/misc/config/)
 - [NeoForge 1.21.1 Recipe Book Categories API](https://github.com/neoforged/NeoForge/blob/1.21.1/src/main/java/net/neoforged/neoforge/client/event/RegisterRecipeBookCategoriesEvent.java)
 - [JEI 官方仓库与 API](https://github.com/mezz/JustEnoughItems)

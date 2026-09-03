@@ -87,21 +87,31 @@ Craftable 不开发独立的 JEI 风格主浏览器。第一阶段增强原版�
 
 第二阶段将更多第三方配方、村民交易和生物动作接入配方书，并在背包界面加入或兼容更多工作站 UI。原版配方书与 JEI 共享前端桥接和状态模型，但渲染层互不依赖。
 
-## 7. 建议配置
+## 7. 配置
 
-### 7.1 服务端/世界配置
+### 7.1 M1 已实现的服务端/世界配置
+
+| 键 | 默认 | 范围/值 | 说明 |
+|---|---:|---|---|
+| `environment.horizontalRadius` | `8` | 1–16 | 水平检测范围；上限控制立方扫描体积 |
+| `environment.verticalRadius` | `4` | 0–8 | 垂直检测范围 |
+| `environment.previewCacheTicks` | `5` | 0–20 | 只用于预览；创建请求始终强制刷新 |
+| `environment.includeEnderChest` | `true` | 布尔 | 需附近存在可用末影箱 |
+
+`loadedChunksOnly=true` 是安全不变量，不开放为可关闭配置。当前扫描形状是水平/垂直分别限界的方盒；它不是欧式球体，不应在 UI 中误标为“欧式距离”。M1 没有为尚未实现的功能注册死配置。
+
+### 7.2 后续里程碑候选配置
 
 | 键 | 建议默认 | 范围/值 | 说明 |
 |---|---:|---|---|
 | `enabled` | `true` | 布尔 | 总开关 |
-| `horizontalRange` | `8` | 1–32 | 水平检测范围 |
-| `verticalRange` | `4` | 1–16 | 垂直检测范围 |
-| `detectionMode` | `RADIUS` | `RADIUS/LINE_OF_SIGHT/REACHABLE` | 阶段二成熟后可改默认 |
-| `loadedChunksOnly` | `true` | 固定为 true | 不允许配置强制加载区块 |
-| `allowEnderInventory` | `true` | 布尔 | 需附近可用末影箱 |
+| `detectionMode` | `BOX` | `BOX/EUCLIDEAN/LINE_OF_SIGHT/REACHABLE` | M9 加入；保留当前方盒行为并允许选择欧式距离或可达性 |
 | `allowBlockInventories` | `true` | 布尔 | 普通方块容器 |
-| `allowEntityInventories` | `false` | 布尔 | 第二阶段功能 |
-| `allowDroppedItems` | `false` | 布尔 | 第二阶段功能 |
+| `allowEntityInventories` | `false` | 布尔 | M9；运输矿车等实体库存 |
+| `allowDroppedItems` | `false` | 布尔 | M9；遵守拾取冷却、所有者和实体竞态 |
+| `allowLivingEntityActions` | `false` | 布尔 | M10 实体动作总开关，不代替动作子开关 |
+| `allowVillagerTrading` | `false` | 布尔 | M10；只有交易执行器完整时才注册 |
+| `allowShearing` | `false` | 布尔 | M10；第一批显式白名单生物互动候选 |
 | `recipeVisibility` | `ALL` | `ALL/UNLOCKED_ONLY` | 是否尊重配方书解锁作为显示过滤；不改变服务端配方合法性 |
 | `instantProcessing` | `true` | 布尔 | 时间压缩总开关；整合包/公服可关闭 |
 | `partialExecution` | `AUTO_SAFE` | `NEVER/CONFIRM/AUTO_SAFE` | 部分完成策略上限 |
@@ -114,13 +124,19 @@ Craftable 不开发独立的 JEI 风格主浏览器。第一阶段增强原版�
 | `undoWindowSeconds` | `15` | 0–120 | 0 表示关闭撤销 |
 | `auditSuccessfulTransactions` | `false` | 布尔 | 默认只审计异常/拒绝 |
 
-范围和预算上限需在性能测试后修正。`loadedChunksOnly` 是安全不变量，不向配置开放为 false。
+这些键在所属功能实现前不注册，名称和范围仍可由性能测试修正。
 
-### 7.2 客户端配置
+### 7.3 M1 已实现的客户端配置
+
+| 键 | 默认 | 说明 |
+|---|---:|---|
+| `presentation.recipeBookEnhancements` | `true` | 启用当前原版配方书入口；关闭后恢复原版判断 |
+| `presentation.detailedFailureFeedback` | `true` | 显示服务端结构化失败原因 |
+
+以下是后续候选项，尚未注册：
 
 | 键 | 建议默认 | 说明 |
 |---|---:|---|
-| `enhanceVanillaRecipeBook` | `true` | 启用原版配方书的 Craftable 状态与操作入口 |
 | `enableJeiIntegration` | `true` | JEI 存在时启用同等状态与快捷操作，不影响原版配方书 |
 | `showRecipeStatus` | `true` | 显示可合成/部分可合成/不可合成状态 |
 | `showPlanPreview` | `true` | 显示消耗与工作站 |
@@ -128,6 +144,8 @@ Craftable 不开发独立的 JEI 风格主浏览器。第一阶段增强原版�
 | `rememberRecipeChoice` | `true` | 记住同一输出的配方偏好 |
 | `confirmPartialExecution` | `false` | 服务端允许自动时客户端仍可要求确认 |
 | `showEnvironmentIndicator` | `true` | 显示工作台/炉/容器可用状态 |
+| `feedbackMode` | `NORMAL` | `NORMAL/QUIET`；控制客户端展示密度，不改变服务端结果 |
+| `narrateCraftingFailures` | `true` | 允许旁白读取主动操作的失败原因 |
 
 键位通过标准 KeyMapping 注册并允许玩家在控制设置中修改：
 
@@ -140,7 +158,12 @@ Craftable 不开发独立的 JEI 风格主浏览器。第一阶段增强原版�
 ## 8. 配置同步与变更
 
 - 世界规则由服务端拥有；客户端界面显示服务端有效值；
-- 服务器修改范围、权限或动作开关后，立即使环境快照、预览和撤销令牌失效；
+- M1.1 使用 NeoForge 内置 `ConfigurationScreen` 提供“模组 → Craftable → 配置”入口；它复用原版 `OptionsSubScreen` 风格、校验、撤销与默认值机制；
+- 单人游戏可以从该界面编辑本地世界服务端配置；远程多人客户端不得用本地 `SERVER` TOML 覆盖服务器规则；
+- M3 评估通过公开 `ScreenEvent` 在原版“选项”页加入同一配置页的直达按钮。扫描、交易、掉落物和时间压缩不直接放进“辅助功能”；那里只允许显示、颜色、通知和旁白偏好；
+- M1 将完整扫描设置纳入缓存身份，范围、缓存时间或末影箱策略变化后旧快照不能复用；
 - 客户端偏好不能放宽服务端限制；
 - 配置项使用翻译键、范围说明和重启/即时生效标记；
 - 配置迁移需要版本号，未知旧值记录警告后回落到安全默认。
+
+具体界面与反馈决策见 [ADR-0003](adr/0003-vanilla-feedback-and-settings-surfaces.md)。
