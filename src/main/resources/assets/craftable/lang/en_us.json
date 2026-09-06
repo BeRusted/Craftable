@@ -36,5 +36,6 @@
   "message.craftable.create.invalid_context": "Crafting failed: use this action from the player inventory recipe book.",
   "message.craftable.create.request_throttled": "That was too fast; try again in a moment.",
   "message.craftable.create.internal_error": "Crafting failed: the transaction errored and materials were restored.",
+  "message.craftable.create.recipe_locked": "Crafting failed: this world requires the recipe to be unlocked first.",
   "toast.craftable.create.failed.title": "Unable to Craft"
 }

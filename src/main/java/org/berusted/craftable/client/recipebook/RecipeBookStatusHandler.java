@@ -6,6 +6,7 @@ import net.minecraft.client.gui.screens.recipebook.RecipeBookComponent;
 import net.minecraft.client.gui.screens.recipebook.RecipeBookPage;
 import net.minecraft.client.gui.screens.recipebook.RecipeButton;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -18,11 +19,11 @@ import org.berusted.craftable.client.mixin.RecipeBookPageAccessor;
 import org.berusted.craftable.config.CraftableClientConfig;
 import org.berusted.craftable.network.RecipeStatusRequestPayload;
 
-/** Requests authoritative status only for the recipe the player is inspecting. */
+/** Gradually refreshes authoritative statuses for the recipe button the player is inspecting. */
 @EventBusSubscriber(modid = Craftable.MOD_ID, value = Dist.CLIENT)
 public final class RecipeBookStatusHandler {
     private static final long STATUS_MAX_AGE_TICKS = 10;
-    private static ResourceLocation lastRequestedRecipe;
+    private static final long REQUEST_INTERVAL_TICKS = 4;
     private static long lastRequestGameTime = Long.MIN_VALUE;
 
     private RecipeBookStatusHandler() {}
@@ -47,24 +48,27 @@ public final class RecipeBookStatusHandler {
             return;
         }
 
-        ResourceLocation recipeId = hoveredButton.getRecipe().id();
         long gameTime = minecraft.level.getGameTime();
-        if (ClientRecipeStatusStore.isFresh(recipeId, gameTime, STATUS_MAX_AGE_TICKS)) {
-            return;
-        }
         long requestAge = gameTime - lastRequestGameTime;
-        if (recipeId.equals(lastRequestedRecipe) && requestAge >= 0 && requestAge < STATUS_MAX_AGE_TICKS) {
+        if (requestAge >= 0 && requestAge < REQUEST_INTERVAL_TICKS) {
             return;
         }
 
-        lastRequestedRecipe = recipeId;
-        lastRequestGameTime = gameTime;
-        PacketDistributor.sendToServer(new RecipeStatusRequestPayload(
-                recipeId, ClientRequestSequence.next()));
+        // Query at most one stale variant per limiter interval. This lets a
+        // cycling button converge to collection-level truth without a burst of
+        // scans or a new batch protocol before M3.
+        for (RecipeHolder<?> candidate : RecipeButtonTargetResolver.candidates(hoveredButton)) {
+            ResourceLocation recipeId = candidate.id();
+            if (!ClientRecipeStatusStore.isFresh(recipeId, gameTime, STATUS_MAX_AGE_TICKS)) {
+                lastRequestGameTime = gameTime;
+                PacketDistributor.sendToServer(new RecipeStatusRequestPayload(
+                        recipeId, ClientRequestSequence.next()));
+                return;
+            }
+        }
     }
 
     public static void clearRequestState() {
-        lastRequestedRecipe = null;
         lastRequestGameTime = Long.MIN_VALUE;
     }
 }

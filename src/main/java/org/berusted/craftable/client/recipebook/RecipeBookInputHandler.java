@@ -61,7 +61,9 @@ public final class RecipeBookInputHandler {
             return;
         }
 
-        RecipeHolder<?> recipe = hoveredButton.getRecipe();
+        // A vanilla button may animate through several equivalent outputs.
+        // Execute the collection's best known target, not the current frame.
+        RecipeHolder<?> recipe = RecipeButtonTargetResolver.preferredRecipe(hoveredButton);
         PacketDistributor.sendToServer(new CreateRecipeRequestPayload(
                 recipe.id(), ClientRequestSequence.next()));
         event.setCanceled(true);

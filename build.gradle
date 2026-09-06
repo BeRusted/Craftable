@@ -54,7 +54,7 @@ runs {
         // Recommended logging level for the console
         // You can set various levels here.
         // Please read: https://stackoverflow.com/questions/2031163/when-to-use-the-different-log-levels
-        systemProperty 'forge.logging.console.level', 'debug'
+        systemProperty 'forge.logging.console.level', 'warn'
 
         workingDirectory project.layout.projectDirectory.dir('run').dir(name)
 
@@ -75,7 +75,9 @@ runs {
     // By default, the server will crash when no gametests are provided.
     // The gametest system is also enabled by default for other run configs under the /test command.
     gameTestServer {
-        systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        // M2 reuses Mojang's empty structure template; production resources do
+        // not gain a test-only NBT file solely to host server-backed tests.
+        systemProperty 'neoforge.enabledGameTestNamespaces', "${project.mod_id},minecraft"
     }
 
     data {

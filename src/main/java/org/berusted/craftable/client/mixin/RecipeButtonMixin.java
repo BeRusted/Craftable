@@ -5,9 +5,8 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.screens.recipebook.RecipeButton;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.item.crafting.RecipeHolder;
 import org.berusted.craftable.api.CraftingStatus;
-import org.berusted.craftable.client.recipebook.ClientRecipeStatusStore;
+import org.berusted.craftable.client.recipebook.RecipeButtonTargetResolver;
 import org.berusted.craftable.config.CraftableClientConfig;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -45,8 +44,7 @@ public abstract class RecipeButtonMixin extends AbstractWidget {
     }
 
     private static CraftingStatus craftable$status(RecipeButton button) {
-        RecipeHolder<?> recipe = button.getRecipe();
-        return ClientRecipeStatusStore.get(recipe.id(), button.getCollection().isCraftable(recipe));
+        return RecipeButtonTargetResolver.status(button);
     }
 
     private static int craftable$color(CraftingStatus status) {

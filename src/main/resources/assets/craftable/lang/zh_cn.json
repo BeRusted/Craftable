@@ -36,5 +36,6 @@
   "message.craftable.create.invalid_context": "制作失败：请在玩家背包的配方书中使用此操作。",
   "message.craftable.create.request_throttled": "操作过快，请稍后重试。",
   "message.craftable.create.internal_error": "制作失败：事务发生内部错误，材料已回滚。",
+  "message.craftable.create.recipe_locked": "制作失败：当前世界要求先解锁该配方。",
   "toast.craftable.create.failed.title": "无法制作"
 }
