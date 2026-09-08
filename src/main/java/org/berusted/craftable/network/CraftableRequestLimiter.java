@@ -8,6 +8,7 @@ import java.util.UUID;
 final class CraftableRequestLimiter {
     private static final Map<UUID, Long> LAST_STATUS_REQUEST = new HashMap<>();
     private static final Map<UUID, Long> LAST_CREATE_REQUEST = new HashMap<>();
+    private static final Map<UUID, Long> LAST_OPEN_REQUEST = new HashMap<>();
 
     private CraftableRequestLimiter() {}
 
@@ -20,8 +21,13 @@ final class CraftableRequestLimiter {
     }
 
     static void clear(UUID playerId) {
+        LAST_OPEN_REQUEST.remove(playerId);
         LAST_STATUS_REQUEST.remove(playerId);
         LAST_CREATE_REQUEST.remove(playerId);
+    }
+
+    static boolean allowOpen(UUID playerId, long gameTime) {
+        return allow(LAST_OPEN_REQUEST, playerId, gameTime, 10);
     }
 
     private static boolean allow(Map<UUID, Long> requests, UUID playerId, long gameTime, long interval) {

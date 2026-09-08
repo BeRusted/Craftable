@@ -6,12 +6,14 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
  * Owns the protocol version and all Craftable payload registrations.
  */
 public final class CraftablePayloads {
-    public static final String PROTOCOL_VERSION = "3";
+    public static final String PROTOCOL_VERSION = "5";
 
     private CraftablePayloads() {}
 
     public static void register(RegisterPayloadHandlersEvent event) {
         var registrar = event.registrar(PROTOCOL_VERSION);
+        registrar.playToServer(OpenInventoryRequestPayload.TYPE, OpenInventoryRequestPayload.STREAM_CODEC,
+                CraftablePayloadHandlers::handleOpenInventory);
         registrar.playToServer(
                 RecipeStatusRequestPayload.TYPE,
                 RecipeStatusRequestPayload.STREAM_CODEC,

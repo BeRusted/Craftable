@@ -10,7 +10,10 @@ import org.berusted.craftable.Craftable;
 /** Client-only integration points that must never be class-loaded by a dedicated server. */
 @Mod(value = Craftable.MOD_ID, dist = Dist.CLIENT)
 public final class CraftableClient {
-    public CraftableClient(ModContainer container) {
+    public CraftableClient(ModContainer container, net.neoforged.bus.api.IEventBus modBus) {
+        modBus.addListener((net.neoforged.neoforge.client.event.RegisterMenuScreensEvent event) ->
+                event.register(org.berusted.craftable.menu.CraftableMenus.AMBIENT_INVENTORY.get(),
+                        org.berusted.craftable.client.menu.AmbientInventoryScreen::new));
         // Reuse NeoForge's vanilla-styled screen instead of maintaining a
         // second set of widgets, persistence rules, and validation logic.
         container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);

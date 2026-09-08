@@ -17,6 +17,7 @@ public final class Craftable {
     public static final Logger LOGGER = LogUtils.getLogger();
 
     public Craftable(IEventBus modEventBus, ModContainer modContainer) {
+        org.berusted.craftable.menu.CraftableMenus.MENUS.register(modEventBus);
         modContainer.registerConfig(ModConfig.Type.SERVER, CraftableServerConfig.SPEC);
         modContainer.registerConfig(ModConfig.Type.CLIENT, CraftableClientConfig.SPEC);
         modEventBus.addListener(CraftablePayloads::register);

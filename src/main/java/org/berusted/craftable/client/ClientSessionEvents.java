@@ -6,13 +6,19 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import org.berusted.craftable.Craftable;
 import org.berusted.craftable.client.recipebook.ClientRecipeStatusStore;
-import org.berusted.craftable.client.recipebook.ClientWorkstationProbe;
 import org.berusted.craftable.client.recipebook.RecipeBookStatusHandler;
 
 /** Prevents cached state from one server session from leaking into another. */
 @EventBusSubscriber(modid = Craftable.MOD_ID, value = Dist.CLIENT)
 public final class ClientSessionEvents {
     private ClientSessionEvents() {}
+
+    @SubscribeEvent
+    public static void onRecipesUpdated(net.neoforged.neoforge.client.event.RecipesUpdatedEvent event) {
+        ClientRecipeStatusStore.clear();
+        ClientRecipeStatusStore.invalidate(ClientRequestSequence.next());
+        RecipeBookStatusHandler.clearRequestState();
+    }
 
     @SubscribeEvent
     public static void onLogin(ClientPlayerNetworkEvent.LoggingIn event) {
@@ -26,7 +32,7 @@ public final class ClientSessionEvents {
 
     private static void clearSessionState() {
         ClientRecipeStatusStore.clear();
-        ClientWorkstationProbe.clear();
+        org.berusted.craftable.client.menu.AmbientInventoryEvents.clear();
         RecipeBookStatusHandler.clearRequestState();
     }
 }

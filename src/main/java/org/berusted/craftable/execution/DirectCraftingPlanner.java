@@ -56,7 +56,10 @@ final class DirectCraftingPlanner {
         }
 
         int gridSize = recipe.canCraftInDimensions(2, 2) ? 2 : 3;
-        if (gridSize == 3 && !snapshot.supports(WorkstationCapability.CRAFTING_3X3)) {
+        // A still-valid opened vanilla workbench is itself a usable workstation,
+        // even when the configured ambient radius is smaller than manual reach.
+        if (gridSize == 3 && !snapshot.supports(WorkstationCapability.CRAFTING_3X3)
+                && !(player.containerMenu instanceof net.minecraft.world.inventory.CraftingMenu)) {
             return DirectCraftingEvaluation.blocked(CraftingResultCode.MISSING_WORKSTATION);
         }
 
@@ -113,9 +116,11 @@ final class DirectCraftingPlanner {
     }
 
     static boolean hasValidContext(ServerPlayer player) {
-        return !player.isSpectator()
+        return org.berusted.craftable.api.CraftableModePolicy.allows(player.gameMode.getGameModeForPlayer())
                 && !player.isDeadOrDying()
-                && player.containerMenu == player.inventoryMenu
+                && (player.containerMenu == player.inventoryMenu
+                    || player.containerMenu instanceof net.minecraft.world.inventory.CraftingMenu)
+                && player.containerMenu.stillValid(player)
                 && player.serverLevel().getServer().isSameThread();
     }
 

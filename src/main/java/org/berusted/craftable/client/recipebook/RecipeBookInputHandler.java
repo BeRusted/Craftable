@@ -3,7 +3,6 @@ package org.berusted.craftable.client.recipebook;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.gui.screens.recipebook.RecipeBookComponent;
 import net.minecraft.client.gui.screens.recipebook.RecipeBookPage;
 import net.minecraft.client.gui.screens.recipebook.RecipeButton;
@@ -27,15 +26,11 @@ public final class RecipeBookInputHandler {
 
     @SubscribeEvent
     public static void onKeyPressed(ScreenEvent.KeyPressed.Pre event) {
-        if (!CraftableClientConfig.recipeBookEnhancementsEnabled()) {
+        if (!RecipeBookProjection.active()) {
             return;
         }
-        if (!(event.getScreen() instanceof InventoryScreen inventoryScreen)) {
-            return;
-        }
-
-        RecipeBookComponent component = inventoryScreen.getRecipeBookComponent();
-        if (!component.isVisible()) {
+        RecipeBookComponent component = RecipeBookProjection.component(event.getScreen());
+        if (component == null || !component.isVisible()) {
             return;
         }
 
@@ -64,6 +59,7 @@ public final class RecipeBookInputHandler {
         // A vanilla button may animate through several equivalent outputs.
         // Execute the collection's best known target, not the current frame.
         RecipeHolder<?> recipe = RecipeButtonTargetResolver.preferredRecipe(hoveredButton);
+        if (recipe == null) return; // A filtered/reloaded collection can disappear between render and input.
         PacketDistributor.sendToServer(new CreateRecipeRequestPayload(
                 recipe.id(), ClientRequestSequence.next()));
         event.setCanceled(true);

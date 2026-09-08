@@ -8,6 +8,8 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 
 @Mixin(RecipeBookPage.class)
 public interface RecipeBookPageAccessor {
+    @Accessor("buttons")
+    java.util.List<RecipeButton> craftable$getButtons();
     @Accessor("hoveredButton")
     @Nullable
     RecipeButton craftable$getHoveredButton();

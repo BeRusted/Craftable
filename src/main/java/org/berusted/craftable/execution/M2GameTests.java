@@ -323,6 +323,7 @@ public final class M2GameTests {
     @SuppressWarnings("removal")
     private static ServerPlayer mockPlayer(GameTestHelper helper) {
         ServerPlayer player = helper.makeMockServerPlayerInLevel();
+        player.setGameMode(net.minecraft.world.level.GameType.SURVIVAL);
         BlockPos position = helper.absolutePos(PLAYER_POS);
         player.setPos(position.getX() + 0.5, position.getY(), position.getZ() + 0.5);
         return player;

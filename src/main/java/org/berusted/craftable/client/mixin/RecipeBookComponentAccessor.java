@@ -9,6 +9,8 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 
 @Mixin(RecipeBookComponent.class)
 public interface RecipeBookComponentAccessor {
+    @Accessor("selectedTab")
+    net.minecraft.client.gui.screens.recipebook.RecipeBookTabButton craftable$getSelectedTab();
     @Accessor("recipeBookPage")
     RecipeBookPage craftable$getRecipeBookPage();
 

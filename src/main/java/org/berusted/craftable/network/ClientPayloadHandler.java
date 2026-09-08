@@ -4,42 +4,36 @@ import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import org.berusted.craftable.client.CraftableFeedback;
+import org.berusted.craftable.client.ClientRequestSequence;
+import org.berusted.craftable.client.menu.AmbientInventoryEvents;
 import org.berusted.craftable.client.recipebook.ClientRecipeStatusStore;
+import org.berusted.craftable.client.recipebook.RecipeBookStatusHandler;
 import org.berusted.craftable.config.CraftableClientConfig;
 
 @OnlyIn(Dist.CLIENT)
 final class ClientPayloadHandler {
     private static long lastCreateResponseRequestId = Long.MIN_VALUE;
-
     private ClientPayloadHandler() {}
 
     static void handle(RecipeStatusResponsePayload payload) {
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.level == null) {
-            return;
+        RecipeBookStatusHandler.received(payload);
+        var mc = Minecraft.getInstance();
+        if (mc.level == null || !org.berusted.craftable.client.recipebook.RecipeBookProjection.modeAllowed()
+                || !ClientRecipeStatusStore.accepts(payload.requestId(), payload.environmentGeneration())) return;
+        for (var entry : payload.entries()) {
+            ClientRecipeStatusStore.put(entry.recipeId(), payload.requestId(), entry.status(), entry.resultCode(),
+                    payload.environmentGeneration(), mc.level.getGameTime());
         }
-        ClientRecipeStatusStore.put(
-                payload.recipeId(),
-                payload.requestId(),
-                payload.status(),
-                payload.resultCode(),
-                payload.environmentGeneration(),
-                minecraft.level.getGameTime());
+        AmbientInventoryEvents.receiveRules(payload);
     }
 
     static void handle(CreateRecipeResultPayload payload) {
-        // Responses may cross on a slow connection. The echoed sequence is only
-        // used to suppress stale UI feedback; the server never trusts it.
-        if (payload.requestId() <= lastCreateResponseRequestId) {
-            return;
-        }
+        if (payload.requestId() <= lastCreateResponseRequestId) return;
         lastCreateResponseRequestId = payload.requestId();
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null) {
-            return;
-        }
-        ClientRecipeStatusStore.clear();
-        CraftableFeedback.showCreateResult(
-                payload.resultCode(), CraftableClientConfig.detailedFailureFeedbackEnabled());
+        if (Minecraft.getInstance().player == null || !org.berusted.craftable.client.recipebook.RecipeBookProjection.modeAllowed()) return;
+        // Sequence barrier also covers previews sent after C but before its
+        // response; they may have observed the pre-commit environment.
+        RecipeBookStatusHandler.afterCreate(ClientRequestSequence.next());
+        CraftableFeedback.showCreateResult(payload.resultCode(), CraftableClientConfig.detailedFailureFeedbackEnabled());
     }
 }

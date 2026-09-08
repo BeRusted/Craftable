@@ -20,7 +20,7 @@ public final class RecipeButtonTargetResolver {
         candidates.addAll(collection.getDisplayRecipes(true));
         candidates.addAll(collection.getDisplayRecipes(false));
         if (candidates.isEmpty()) {
-            candidates.add(button.getRecipe());
+            candidates.addAll(RecipeBookProjection.candidates(collection));
         }
         return List.copyOf(candidates);
     }
@@ -35,9 +35,11 @@ public final class RecipeButtonTargetResolver {
         return strongestStatus(statuses);
     }
 
-    static RecipeHolder<?> preferredRecipe(RecipeButton button) {
+    @org.jetbrains.annotations.Nullable
+    public static RecipeHolder<?> preferredRecipe(RecipeButton button) {
         RecipeCollection collection = button.getCollection();
         List<RecipeHolder<?>> candidates = candidates(button);
+        if (candidates.isEmpty()) return null;
         List<CraftingStatus> statuses = new ArrayList<>(candidates.size());
         List<Boolean> vanillaCraftable = new ArrayList<>(candidates.size());
         for (RecipeHolder<?> candidate : candidates) {
@@ -45,8 +47,9 @@ public final class RecipeButtonTargetResolver {
             vanillaCraftable.add(vanillaStatus);
             statuses.add(ClientRecipeStatusStore.get(candidate.id(), vanillaStatus));
         }
-        int currentIndex = candidates.indexOf(button.getRecipe());
-        return candidates.get(preferredIndex(statuses, vanillaCraftable, currentIndex));
+        // Selection is independent of the animation index, including the frame
+        // between a tab/page change and vanilla's next renderWidget update.
+        return candidates.get(preferredIndex(statuses, vanillaCraftable, 0));
     }
 
     static CraftingStatus strongestStatus(List<CraftingStatus> statuses) {
@@ -60,6 +63,22 @@ public final class RecipeButtonTargetResolver {
             }
         }
         return best;
+    }
+
+    public static ClientRecipeStatusStore.Lifecycle lifecycle(RecipeButton button) {
+        var recipes = candidates(button);
+        var target = preferredRecipe(button);
+        if (target == null) return ClientRecipeStatusStore.Lifecycle.UNKNOWN;
+        if (ClientRecipeStatusStore.get(target.id(), false) == CraftingStatus.CRAFTABLE) {
+            return ClientRecipeStatusStore.lifecycle(target.id());
+        }
+        boolean unknown = false;
+        for (var recipe : recipes) {
+            var state = ClientRecipeStatusStore.lifecycle(recipe.id());
+            if (state == ClientRecipeStatusStore.Lifecycle.PENDING) return state;
+            if (state == ClientRecipeStatusStore.Lifecycle.UNKNOWN) unknown = true;
+        }
+        return unknown ? ClientRecipeStatusStore.Lifecycle.UNKNOWN : ClientRecipeStatusStore.Lifecycle.KNOWN;
     }
 
     static int preferredIndex(

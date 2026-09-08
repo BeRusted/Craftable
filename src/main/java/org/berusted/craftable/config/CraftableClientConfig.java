@@ -24,12 +24,18 @@ public final class CraftableClientConfig {
         return VALUES.detailedFailureFeedback.get();
     }
 
+    public static boolean unlockedOnly() { return VALUES.unlockedOnly.get(); }
+
     private static final class Values {
         private final ModConfigSpec.BooleanValue recipeBookEnhancements;
         private final ModConfigSpec.BooleanValue detailedFailureFeedback;
+        private final ModConfigSpec.BooleanValue unlockedOnly;
 
         private Values(ModConfigSpec.Builder builder) {
             builder.push("presentation");
+            unlockedOnly = builder.translation("config.craftable.client.unlocked_only")
+                    .comment("Only show recipes unlocked by the player; does not change progression.")
+                    .define("unlockedOnly", false);
             recipeBookEnhancements = builder
                     .comment("Enable Craftable's current vanilla recipe-book entry points.")
                     .translation("config.craftable.client.recipe_book_enhancements")

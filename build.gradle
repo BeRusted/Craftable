@@ -40,6 +40,13 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 //minecraft.accessTransformers.entry public net.minecraft.client.Minecraft textureManager # textureManager
 
 // Default run configurations.
+// Optional, isolated client acceptance harness. It is not part of the shipped JAR.
+sourceSets {
+    m3ClientTest {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+}
 // These can be tweaked, removed, or duplicated as needed.
 runs {
     // applies to all the run configs below
@@ -62,6 +69,10 @@ runs {
     }
 
     client {
+        if (project.hasProperty('m3Smoke')) {
+            modSource project.sourceSets.m3ClientTest
+            systemProperty 'craftable.m3Smoke', 'true'
+        }
         // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
         systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
     }
@@ -86,6 +97,32 @@ runs {
 
         // Specify the modid for data generation, where to output the resulting resource, and where to look for existing resources.
         arguments.addAll '--mod', project.mod_id, '--all', '--output', file('src/generated/resources/').getAbsolutePath(), '--existing', file('src/main/resources/').getAbsolutePath()
+    }
+}
+
+// A normal client shutdown has exit code zero even after a caught assertion.
+// Make the opt-in harness fail the Gradle task unless its explicit pass marker exists.
+if (project.hasProperty('m3Smoke')) {
+    def m3SmokeLog = layout.projectDirectory.file('run/client/logs/latest.log').asFile
+    tasks.matching { it.name == 'runClient' }.configureEach {
+        doLast {
+            def result = m3SmokeLog.exists() ? m3SmokeLog.getText('UTF-8') : ''
+            if (!result.contains('M3_SMOKE PASS:') || result.contains('M3_SMOKE FAIL')) {
+                throw new GradleException('M3 client smoke failed; inspect run/client/logs/latest.log')
+            }
+        }
+    }
+}
+
+// A loader failure can also exit the game server with zero. Require the actual
+// GameTest completion marker, not merely successful process termination.
+def craftableGameTestLog = layout.projectDirectory.file('run/gameTestServer/logs/latest.log').asFile
+tasks.matching { it.name == 'runGameTestServer' }.configureEach {
+    doLast {
+        def result = craftableGameTestLog.exists() ? craftableGameTestLog.getText('UTF-8') : ''
+        if (!(result =~ /All \d+ required tests passed/).find()) {
+            throw new GradleException('GameTest server did not pass; inspect run/gameTestServer/logs/latest.log')
+        }
     }
 }
 

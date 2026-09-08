@@ -7,6 +7,7 @@
     "RecipeBookComponentAccessor",
     "RecipeBookPageAccessor",
     "RecipeButtonMixin",
+    "RecipeBookComponentMixin",
     "RecipeCollectionMixin"
   ],
   "injectors": {
