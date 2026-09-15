@@ -15,7 +15,6 @@
   "environment": "*",
   "entrypoints": {
     "fabric-datagen": [
-      "org.berusted.craftable.client.CraftableDataGenerator"
     ],
     "client": [
       "org.berusted.craftable.client.CraftableClient"
@@ -34,6 +33,7 @@
   "depends": {
     "fabricloader": ">=${loader_version}",
     "fabric-api": "*",
+    "malilib": "*",
     "minecraft": "${minecraft_version}"
   },
   "custom": {
