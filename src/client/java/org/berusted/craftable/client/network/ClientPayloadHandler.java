@@ -18,31 +18,8 @@ public final class ClientPayloadHandler {
     }
 
     public static void handleStatusResponse(RecipeStatusResponsePayload payload, ClientPlayNetworking.Context context) {
-        ClientPayloadHandler.handle(payload);
-    }
-
-    public static void handleCreateResult(CreateRecipeResultPayload payload, ClientPlayNetworking.Context context) {
-        ClientPayloadHandler.handle(payload);
-    }
-
-    public static void register() {
-
-        ClientPlayNetworking.registerGlobalReceiver(
-                RecipeStatusResponsePayload.TYPE,
-                ClientPayloadHandler::handleStatusResponse
-        );
-
-        ClientPlayNetworking.registerGlobalReceiver(
-                CreateRecipeResultPayload.TYPE,
-                ClientPayloadHandler::handleCreateResult
-        );
-    }
-
-
-    static void handle(RecipeStatusResponsePayload payload) {
         RecipeBookStatusHandler.received(payload);
-
-        var mc = Minecraft.getInstance();
+        var mc = context.client();
 
         if (mc.level == null
                 || !org.berusted.craftable.client.recipebook.RecipeBookProjection.modeAllowed()
@@ -66,14 +43,14 @@ public final class ClientPayloadHandler {
         AmbientInventoryEvents.receiveRules(payload);
     }
 
-    static void handle(CreateRecipeResultPayload payload) {
+    public static void handleCreateResult(CreateRecipeResultPayload payload, ClientPlayNetworking.Context context) {
         if (payload.requestId() <= lastCreateResponseRequestId) {
             return;
         }
-
+        var mc = context.client();
         lastCreateResponseRequestId = payload.requestId();
 
-        if (Minecraft.getInstance().player == null
+        if (mc.player == null
                 || !org.berusted.craftable.client.recipebook.RecipeBookProjection.modeAllowed()) {
             return;
         }
@@ -85,4 +62,18 @@ public final class ClientPayloadHandler {
                 CraftableClientConfig.detailedFailureFeedbackEnabled()
         );
     }
+
+    public static void register() {
+
+        ClientPlayNetworking.registerGlobalReceiver(
+                RecipeStatusResponsePayload.TYPE,
+                ClientPayloadHandler::handleStatusResponse
+        );
+
+        ClientPlayNetworking.registerGlobalReceiver(
+                CreateRecipeResultPayload.TYPE,
+                ClientPayloadHandler::handleCreateResult
+        );
+    }
+
 }
