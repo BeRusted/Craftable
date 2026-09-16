@@ -8,7 +8,7 @@ import net.minecraft.client.gui.screens.recipebook.RecipeCollection;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import org.berusted.craftable.client.mixin.RecipeBookComponentAccessor;
-import org.berusted.craftable.config.CraftableClientConfig;
+import org.berusted.craftable.client.config.CraftableClientConfig;
 
 import java.util.List;
 import java.util.Locale;
