@@ -4,7 +4,9 @@
   "version": "${version}",
   "name": "Craftable",
   "description": "Craft what you can, from what you have.\n\nCraftable turns nearby accessible resources and workstations into a convenient,\nplayer-centered crafting environment.",
-  "authors": ["BeRusted"],
+  "authors": [
+    "BeRusted"
+  ],
   "contact": {
     "homepage": "https://modrinth.com/mod/craftable-mod",
     "source": "https://github.com/BeRusted/Craftable",
@@ -36,8 +38,10 @@
   "depends": {
     "fabricloader": ">=${loader_version}",
     "fabric-api": "*",
-    "malilib": "*",
     "minecraft": "${minecraft_version}"
+  },
+  "suggests": {
+    "malilib": "*"
   },
   "custom": {
     "modmenu": {

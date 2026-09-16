@@ -1,13 +1,10 @@
 package org.berusted.craftable.client;
 
-import fi.dy.masa.malilib.config.ConfigManager;
-import fi.dy.masa.malilib.registry.Registry;
-import fi.dy.masa.malilib.util.data.ModInfo;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraft.resources.ResourceLocation;
-import org.berusted.craftable.client.config.CraftableClientConfig;
-import org.berusted.craftable.client.config.CraftableGuiConfigs;
+import org.berusted.craftable.client.compat.malilib.MalilibCompat;
 import org.berusted.craftable.client.menu.AmbientInventoryEvents;
 import org.berusted.craftable.client.menu.AmbientInventoryScreen;
 import org.berusted.craftable.client.network.ClientPayloadHandler;
@@ -38,17 +35,9 @@ public class CraftableClient implements ClientModInitializer {
         RecipeBookInputHandler.register();
         RecipeBookStatusHandler.register();
 
-        ConfigManager.getInstance().registerConfigHandler(
-                CraftableClient.MOD_ID,
-                new CraftableClientConfig()
-        );
-
-        Registry.CONFIG_SCREEN.registerConfigScreenFactory(
-                new ModInfo(
-                        CraftableClient.MOD_ID,
-                        CraftableClient.MOD_NAME,
-                        CraftableGuiConfigs::new
-                )
-        );
+        // malilib 是可选依赖：只有安装时才接入它的配置管理与配置界面
+        if (FabricLoader.getInstance().isModLoaded(MalilibCompat.MALILIB_MOD_ID)) {
+            MalilibCompat.register();
+        }
     }
 }

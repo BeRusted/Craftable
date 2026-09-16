@@ -1,4 +1,4 @@
-package org.berusted.craftable.client.config;
+package org.berusted.craftable.client.compat.malilib;
 
 import fi.dy.masa.malilib.config.IConfigBase;
 import fi.dy.masa.malilib.gui.GuiConfigsBase;
@@ -11,6 +11,9 @@ import org.berusted.craftable.client.CraftableClient;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * 基于 malilib 的配置界面。仅在 malilib 安装时由 {@link MalilibCompat} 加载。
+ */
 public class CraftableGuiConfigs extends GuiConfigsBase {
     public static ConfigGuiTab tab = ConfigGuiTab.GENERIC;
 
@@ -60,7 +63,7 @@ public class CraftableGuiConfigs extends GuiConfigsBase {
         ConfigGuiTab tab = CraftableGuiConfigs.tab;
 
         if (tab == ConfigGuiTab.GENERIC) {
-            configs = CraftableClientConfig.Generic.OPTIONS;
+            configs = MalilibConfigHandler.Generic.OPTIONS;
         } else {
             return Collections.emptyList();
         }
