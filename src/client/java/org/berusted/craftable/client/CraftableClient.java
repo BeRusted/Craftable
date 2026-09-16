@@ -7,7 +7,7 @@ import net.fabricmc.api.ClientModInitializer;
 import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraft.resources.ResourceLocation;
 import org.berusted.craftable.client.config.CraftableClientConfig;
-import org.berusted.craftable.client.config.GuiConfigs;
+import org.berusted.craftable.client.config.CraftableGuiConfigs;
 import org.berusted.craftable.client.menu.AmbientInventoryEvents;
 import org.berusted.craftable.client.menu.AmbientInventoryScreen;
 import org.berusted.craftable.client.network.ClientPayloadHandler;
@@ -47,7 +47,7 @@ public class CraftableClient implements ClientModInitializer {
                 new ModInfo(
                         CraftableClient.MOD_ID,
                         CraftableClient.MOD_NAME,
-                        GuiConfigs::new
+                        CraftableGuiConfigs::new
                 )
         );
     }
