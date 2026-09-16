@@ -1,4 +1,4 @@
-package org.berusted.craftable.network;
+package org.berusted.craftable.network.payload;
 
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -10,10 +10,14 @@ import org.berusted.craftable.api.CraftingStatus;
 
 import java.util.List;
 
-public record RecipeStatusResponsePayload(List<Entry> entries, long requestId, long environmentGeneration,
-                                          boolean craftingTable, int horizontalRadius, int verticalRadius,
-                                          int previewTicks, boolean enderChest)
-        implements CustomPacketPayload {
+public record RecipeStatusResponsePayload(
+        List<Entry> entries,
+        long requestId, long environmentGeneration,
+        boolean craftingTable,
+        int horizontalRadius,
+        int verticalRadius,
+        int previewTicks,
+        boolean enderChest) implements CustomPacketPayload {
     public static final Type<RecipeStatusResponsePayload> TYPE = new Type<>(Craftable.id("recipe_status_response"));
     public static final StreamCodec<RegistryFriendlyByteBuf, RecipeStatusResponsePayload> STREAM_CODEC = CustomPacketPayload.codec(
             (payload, buffer) -> {

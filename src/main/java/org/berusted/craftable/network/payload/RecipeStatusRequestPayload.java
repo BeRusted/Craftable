@@ -1,4 +1,4 @@
-package org.berusted.craftable.network;
+package org.berusted.craftable.network.payload;
 
 import java.util.List;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -7,7 +7,6 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import org.berusted.craftable.Craftable;
 
-/** Bounded read-only batch; decoding rejects oversized lists before allocation. */
 public record RecipeStatusRequestPayload(List<ResourceLocation> recipeIds, long requestId) implements CustomPacketPayload {
     public static final int MAX_RECIPES = 32;
     public RecipeStatusRequestPayload {

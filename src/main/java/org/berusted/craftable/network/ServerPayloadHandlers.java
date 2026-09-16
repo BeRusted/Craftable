@@ -18,16 +18,10 @@ import org.berusted.craftable.environment.EnvironmentSnapshotService;
 import org.berusted.craftable.execution.DirectCraftingEvaluation;
 import org.berusted.craftable.execution.DirectCraftingService;
 import org.berusted.craftable.menu.AmbientInventoryMenu;
+import org.berusted.craftable.network.payload.*;
 import org.berusted.craftable.workstation.WorkstationCapability;
 import org.berusted.craftable.workstation.WorkstationEndpoint;
 
-/**
- * Server receivers for the Craftable request payloads.
- *
- * <p>ServerPlayNetworking dispatches receivers through {@code MinecraftServer#execute},
- * so every handler already runs on the server main thread and may scan or commit
- * world state directly.
- */
 public final class ServerPayloadHandlers {
     private ServerPayloadHandlers() {
     }
@@ -50,8 +44,6 @@ public final class ServerPayloadHandlers {
         if (tables.isEmpty()) {
             return;
         }
-        // openMenu does not remove inventoryMenu itself. Return its grid and
-        // carried stack first, so opening cannot strand items in the old 2x2.
         player.inventoryMenu.removed(player);
         player.inventoryMenu.broadcastChanges();
         player.openMenu(new SimpleMenuProvider(
@@ -76,7 +68,6 @@ public final class ServerPayloadHandlers {
         for (ResourceLocation id : new LinkedHashSet<>(payload.recipeIds())) {
             DirectCraftingEvaluation evaluation = DirectCraftingService.evaluate(player, id, snapshot);
             entries.add(new RecipeStatusResponsePayload.Entry(id, evaluation.status(), evaluation.resultCode()));
-            // A partial batch is retried by the client, never reported as blocked.
             if (System.nanoTime() >= deadline) {
                 break;
             }

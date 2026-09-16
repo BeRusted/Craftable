@@ -1,4 +1,4 @@
-package org.berusted.craftable.network;
+package org.berusted.craftable.network.payload;
 
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -10,8 +10,7 @@ import org.berusted.craftable.api.CraftingResultCode;
 public record CreateRecipeResultPayload(
         ResourceLocation recipeId,
         long requestId,
-        CraftingResultCode resultCode)
-        implements CustomPacketPayload {
+        CraftingResultCode resultCode) implements CustomPacketPayload {
     public static final Type<CreateRecipeResultPayload> TYPE = new Type<>(Craftable.id("create_recipe_result"));
     public static final StreamCodec<RegistryFriendlyByteBuf, CreateRecipeResultPayload> STREAM_CODEC =
             CustomPacketPayload.codec(

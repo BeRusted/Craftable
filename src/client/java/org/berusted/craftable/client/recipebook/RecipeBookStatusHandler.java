@@ -9,7 +9,8 @@ import net.minecraft.resources.ResourceLocation;
 import org.berusted.craftable.client.ClientRequestSequence;
 import org.berusted.craftable.client.mixin.RecipeBookComponentAccessor;
 import org.berusted.craftable.client.mixin.RecipeBookPageAccessor;
-import org.berusted.craftable.network.RecipeStatusRequestPayload;
+import org.berusted.craftable.network.payload.RecipeStatusRequestPayload;
+import org.berusted.craftable.network.payload.RecipeStatusResponsePayload;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -109,10 +110,10 @@ public class RecipeBookStatusHandler {
         );
     }
 
-    public static void received(org.berusted.craftable.network.RecipeStatusResponsePayload payload) {
+    public static void received(RecipeStatusResponsePayload payload) {
         if (payload.requestId() == inFlight) {
             QUEUE.received(sentBatch, payload.entries().stream().map(
-                    org.berusted.craftable.network.RecipeStatusResponsePayload.Entry::recipeId).toList());
+                    RecipeStatusResponsePayload.Entry::recipeId).toList());
             inFlight = -1;
         }
     }

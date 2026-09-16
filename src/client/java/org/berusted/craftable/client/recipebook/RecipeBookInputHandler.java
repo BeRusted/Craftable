@@ -16,7 +16,7 @@ import org.berusted.craftable.client.ClientRequestSequence;
 import org.berusted.craftable.client.CraftableKeyMappings;
 import org.berusted.craftable.client.mixin.RecipeBookComponentAccessor;
 import org.berusted.craftable.client.mixin.RecipeBookPageAccessor;
-import org.berusted.craftable.network.CreateRecipeRequestPayload;
+import org.berusted.craftable.network.payload.CreateRecipeRequestPayload;
 
 public final class RecipeBookInputHandler {
 

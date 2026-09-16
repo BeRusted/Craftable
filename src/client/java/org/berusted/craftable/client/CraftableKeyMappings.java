@@ -26,13 +26,6 @@ public final class CraftableKeyMappings {
             )
     );
 
-    /**
-     * 必须在客户端初始化阶段（{@code GameOptions} 构造之前）调用。
-     * <p>
-     * 调用本方法本身即触发类初始化，从而完成 {@link KeyBindingHelper#registerKeyBinding}。
-     * 若延后到首次使用 {@link #CREATE_ONE} 时才惰性初始化，Fabric 会抛出
-     * {@code IllegalStateException: GameOptions has already been initialised}。
-     */
     public static void register() {
         if (CREATE_ONE == null || UNDO_LAST == null) {
             throw new IllegalStateException("Craftable 按键注册失败");

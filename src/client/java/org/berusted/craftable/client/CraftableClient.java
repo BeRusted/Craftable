@@ -9,7 +9,6 @@ import org.berusted.craftable.client.network.ClientPayloadHandler;
 import org.berusted.craftable.menu.CraftableMenus;
 import org.berusted.craftable.client.recipebook.RecipeBookInputHandler;
 import org.berusted.craftable.client.recipebook.RecipeBookStatusHandler;
-import org.berusted.craftable.network.RecipeStatusResponsePayload;
 
 public class CraftableClient implements ClientModInitializer {
 

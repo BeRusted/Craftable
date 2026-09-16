@@ -8,8 +8,8 @@ import org.berusted.craftable.client.menu.AmbientInventoryEvents;
 import org.berusted.craftable.client.recipebook.ClientRecipeStatusStore;
 import org.berusted.craftable.client.recipebook.RecipeBookStatusHandler;
 import org.berusted.craftable.config.CraftableClientConfig;
-import org.berusted.craftable.network.CreateRecipeResultPayload;
-import org.berusted.craftable.network.RecipeStatusResponsePayload;
+import org.berusted.craftable.network.payload.CreateRecipeResultPayload;
+import org.berusted.craftable.network.payload.RecipeStatusResponsePayload;
 
 public final class ClientPayloadHandler {
     private static long lastCreateResponseRequestId = Long.MIN_VALUE;

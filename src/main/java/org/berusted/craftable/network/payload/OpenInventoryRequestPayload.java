@@ -1,4 +1,4 @@
-package org.berusted.craftable.network;
+package org.berusted.craftable.network.payload;
 
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;

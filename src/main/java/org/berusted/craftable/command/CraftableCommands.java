@@ -4,6 +4,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -24,9 +25,7 @@ public final class CraftableCommands {
 
     public static void register() {
         CommandRegistrationCallback.EVENT.register(
-                (dispatcher, registryAccess, environment) -> {
-                    register(dispatcher);
-                }
+                CraftableCommands::register
         );
     }
 
@@ -172,6 +171,10 @@ public final class CraftableCommands {
                 + snapshot.origin().getY()
                 + ","
                 + snapshot.origin().getZ();
+    }
+
+    private static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext registryAccess, Commands.CommandSelection environment) {
+        register(dispatcher);
     }
 
     private record EndpointSummary(

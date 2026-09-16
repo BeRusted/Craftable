@@ -1,6 +1,7 @@
 package org.berusted.craftable.network;
 
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import org.berusted.craftable.network.payload.*;
 
 public class CraftablePayloads {
     public static final String PROTOCOL_VERSION = "5";

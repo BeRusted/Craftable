@@ -8,8 +8,8 @@ import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.world.level.GameType;
 import org.berusted.craftable.client.ClientRequestSequence;
-import org.berusted.craftable.network.OpenInventoryRequestPayload;
-import org.berusted.craftable.network.RecipeStatusResponsePayload;
+import org.berusted.craftable.network.payload.OpenInventoryRequestPayload;
+import org.berusted.craftable.network.payload.RecipeStatusResponsePayload;
 
 
 public class AmbientInventoryEvents {
@@ -26,8 +26,6 @@ public class AmbientInventoryEvents {
         var mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null || mc.screen != screen
                 || !org.berusted.craftable.client.recipebook.RecipeBookProjection.modeAllowed()) return;
-        // Vanilla may construct InventoryScreen while leaving its creative
-        // catalog. That automatic conversion is not a new player open action.
         if (observedMode != null && !org.berusted.craftable.api.CraftableModePolicy.allows(observedMode)) return;
         long now = mc.level.getGameTime();
         if (screen == requestedFrom && now - requestedAt >= 0 && now - requestedAt < 20) return;
@@ -85,7 +83,6 @@ public class AmbientInventoryEvents {
                 book.recipesUpdated();
             }
 
-            // Returning to survival does not open an inventory or request a menu.
             if (returning && (mc.screen instanceof InventoryScreen || mc.screen instanceof CreativeModeInventoryScreen)) {
                 mc.player.closeContainer();
             }
