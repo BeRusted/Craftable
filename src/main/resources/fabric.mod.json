@@ -21,6 +21,9 @@
     ],
     "main": [
       "org.berusted.craftable.Craftable"
+    ],
+    "modmenu": [
+      "org.berusted.craftable.client.compat.modmenu.ModMenuImpl"
     ]
   },
   "mixins": [

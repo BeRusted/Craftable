@@ -62,6 +62,8 @@ dependencies {
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
     modImplementation "maven.modrinth:malilib:${project.malilib_version}"
 
+    modCompileOnly "com.terraformersmc:modmenu:${project.modmenu_version}"
+
     modLocalRuntime "com.terraformersmc:modmenu:${project.modmenu_version}"
     modLocalRuntime "eu.pb4:placeholder-api:${project.text_placeholder_api_version}"
 }

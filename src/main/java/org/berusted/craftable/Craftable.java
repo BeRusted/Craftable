@@ -14,6 +14,7 @@ import org.berusted.craftable.network.ServerPayloadHandlers;
 public class Craftable implements ModInitializer {
 
     public static final String MOD_ID = "craftable";
+    public static final String MOD_NAME = "Craftable";
     public static final Logger LOGGER = LogManager.getLogger();
 
     public Craftable() {
