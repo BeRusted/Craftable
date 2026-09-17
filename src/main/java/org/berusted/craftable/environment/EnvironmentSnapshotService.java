@@ -1,8 +1,8 @@
 package org.berusted.craftable.environment;
 
 import net.minecraft.server.level.ServerPlayer;
-import org.berusted.craftable.config.CraftableServerConfig;
-import org.berusted.craftable.config.EnvironmentScanSettings;
+import org.berusted.craftable.config.CraftableServerConfigHandler;
+import org.berusted.craftable.config.CraftableServerConfigHandler.EnvironmentScanSettings;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -16,7 +16,7 @@ public final class EnvironmentSnapshotService {
 
     public static EnvironmentSnapshot preview(ServerPlayer player) {
         requireServerThread(player);
-        EnvironmentScanSettings settings = CraftableServerConfig.scanSettings();
+        EnvironmentScanSettings settings = CraftableServerConfigHandler.scanSettings();
         EnvironmentSnapshotCacheKey key = key(player, settings);
         PlayerState state = PLAYER_STATES.computeIfAbsent(player.getUUID(), ignored -> new PlayerState());
         EnvironmentSnapshot cached = state.cached;
@@ -31,7 +31,7 @@ public final class EnvironmentSnapshotService {
     public static EnvironmentSnapshot fresh(ServerPlayer player) {
         requireServerThread(player);
         PlayerState state = PLAYER_STATES.computeIfAbsent(player.getUUID(), ignored -> new PlayerState());
-        return capture(player, CraftableServerConfig.scanSettings(), state);
+        return capture(player, CraftableServerConfigHandler.scanSettings(), state);
     }
 
     public static void invalidate(UUID playerId) {

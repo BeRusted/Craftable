@@ -12,7 +12,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.SimpleMenuProvider;
 import org.berusted.craftable.api.CraftableModePolicy;
 import org.berusted.craftable.api.CraftingResultCode;
-import org.berusted.craftable.config.EnvironmentScanSettings;
+import org.berusted.craftable.config.CraftableServerConfigHandler.EnvironmentScanSettings;
 import org.berusted.craftable.environment.EnvironmentSnapshot;
 import org.berusted.craftable.environment.EnvironmentSnapshotService;
 import org.berusted.craftable.execution.DirectCraftingEvaluation;

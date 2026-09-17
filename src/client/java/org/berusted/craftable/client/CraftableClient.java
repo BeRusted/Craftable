@@ -5,6 +5,7 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraft.resources.ResourceLocation;
 import org.berusted.craftable.client.compat.malilib.MalilibCompat;
+import org.berusted.craftable.client.config.CraftableConfigHandler;
 import org.berusted.craftable.client.menu.AmbientInventoryEvents;
 import org.berusted.craftable.client.menu.AmbientInventoryScreen;
 import org.berusted.craftable.client.network.ClientPayloadHandler;
@@ -23,6 +24,9 @@ public class CraftableClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        // 配置核心不依赖 malilib，始终先初始化（文件不存在时会自动写出默认配置）
+        CraftableConfigHandler.init();
+
         // 菜单类型本身在主入口点注册，这里只负责把它绑定到客户端屏幕
         MenuScreens.register(CraftableMenus.AMBIENT_INVENTORY, AmbientInventoryScreen::new);
 

@@ -22,9 +22,13 @@ public final class MalilibCompat {
      * 注册配置处理器与配置界面工厂（供 malilib 自身的配置列表使用）。
      */
     public static void register() {
+        MalilibConfigHandler handler = new MalilibConfigHandler();
+        // 注册前先把配置核心的值投影到 malilib 选项，确保界面显示真实生效值
+        handler.load();
+
         ConfigManager.getInstance().registerConfigHandler(
                 CraftableClient.MOD_ID,
-                new MalilibConfigHandler()
+                handler
         );
 
         Registry.CONFIG_SCREEN.registerConfigScreenFactory(

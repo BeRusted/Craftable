@@ -11,7 +11,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
-import org.berusted.craftable.config.CraftableServerConfig;
+import org.berusted.craftable.config.CraftableServerConfigHandler;
 import org.berusted.craftable.menu.mixin.SlotPositionAccessor;
 
 import java.util.List;
@@ -139,7 +139,7 @@ public class AmbientInventoryMenu extends CraftingMenu {
                 || !(player instanceof ServerPlayer serverPlayer)
                 || !org.berusted.craftable.api.CraftableModePolicy.allows(serverPlayer.gameMode.getGameModeForPlayer())
                 || serverPlayer.gameMode.getGameModeForPlayer() != openedGameMode) return false;
-        var settings = CraftableServerConfig.scanSettings();
+        var settings = CraftableServerConfigHandler.scanSettings();
         BlockPos origin = player.blockPosition();
         return tables.stream().anyMatch(pos -> withinRange(origin, pos, settings.horizontalRadius(), settings.verticalRadius())
                 && openedLevel.isLoaded(pos) && openedLevel.getBlockState(pos).is(Blocks.CRAFTING_TABLE));

@@ -5,6 +5,7 @@ import net.minecraft.resources.ResourceLocation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.berusted.craftable.command.CraftableCommands;
+import org.berusted.craftable.config.CraftableServerConfigHandler;
 import org.berusted.craftable.environment.EnvironmentSnapshotEvents;
 import org.berusted.craftable.menu.CraftableMenus;
 import org.berusted.craftable.network.CraftableNetworkEvents;
