@@ -68,7 +68,10 @@ public abstract class RecipeButtonMixin extends AbstractWidget {
         if (!RecipeBookProjection.active()) { gui.blitSprite(sprite, x, y, width, height); return; }
         var button = (RecipeButton) (Object) this;
         var status = RecipeButtonTargetResolver.status(button);
-        boolean unknown = RecipeButtonTargetResolver.lifecycle(button) == ClientRecipeStatusStore.Lifecycle.UNKNOWN;
+        var target = RecipeButtonTargetResolver.preferredRecipe(button);
+        boolean limited = target != null && ClientRecipeStatusStore.reason(target.id())
+                == org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED;
+        boolean unknown = limited || RecipeButtonTargetResolver.lifecycle(button) != ClientRecipeStatusStore.Lifecycle.KNOWN;
         if (!unknown) {
             switch (status) {
                 case CRAFTABLE -> gui.setColor(0.65F, 1F, 0.65F, 1F);
@@ -87,7 +90,10 @@ public abstract class RecipeButtonMixin extends AbstractWidget {
         if (!RecipeBookProjection.active()) return;
         var button = (RecipeButton) (Object) this;
         var lifecycle = RecipeButtonTargetResolver.lifecycle(button);
-        String symbol = lifecycle == ClientRecipeStatusStore.Lifecycle.UNKNOWN ? "?"
+        var target = RecipeButtonTargetResolver.preferredRecipe(button);
+        boolean limited = target != null && ClientRecipeStatusStore.reason(target.id())
+                == org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED;
+        String symbol = limited || lifecycle == ClientRecipeStatusStore.Lifecycle.UNKNOWN ? "?"
                 : lifecycle == ClientRecipeStatusStore.Lifecycle.PENDING ? "~"
                 : switch (RecipeButtonTargetResolver.status(button)) {
                     case CRAFTABLE -> "+"; case PARTIAL -> "~"; case BLOCKED -> "!";
@@ -105,7 +111,13 @@ public abstract class RecipeButtonMixin extends AbstractWidget {
         if (!RecipeBookProjection.active()) return;
         var button = (RecipeButton) (Object) this;
         var lifecycle = RecipeButtonTargetResolver.lifecycle(button);
-        if (lifecycle != ClientRecipeStatusStore.Lifecycle.UNKNOWN) {
+        var target = RecipeButtonTargetResolver.preferredRecipe(button);
+        if (target == null) return;
+        boolean limited = ClientRecipeStatusStore.reason(target.id())
+                == org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED;
+        if (limited) {
+            ci.getReturnValue().add(Component.translatable("reason.craftable.search_budget_exceeded"));
+        } else if (lifecycle != ClientRecipeStatusStore.Lifecycle.UNKNOWN) {
             var status = RecipeButtonTargetResolver.status(button);
             Component label = Component.translatable("status.craftable." + status.name().toLowerCase(java.util.Locale.ROOT));
             ci.getReturnValue().add(status == CraftingStatus.BLOCKED
@@ -115,5 +127,6 @@ public abstract class RecipeButtonMixin extends AbstractWidget {
         }
         if (lifecycle != ClientRecipeStatusStore.Lifecycle.KNOWN) ci.getReturnValue().add(Component.translatable("tooltip.craftable.pending"));
         ci.getReturnValue().add(Component.translatable("tooltip.craftable.create_one"));
+        ci.getReturnValue().add(Component.translatable("tooltip.craftable.details"));
     }
 }

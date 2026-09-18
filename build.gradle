@@ -69,9 +69,9 @@ runs {
     }
 
     client {
-        if (project.hasProperty('m3Smoke')) {
+        if (project.hasProperty('m3Smoke') || project.hasProperty('m4Smoke')) {
             modSource project.sourceSets.m3ClientTest
-            systemProperty 'craftable.m3Smoke', 'true'
+            systemProperty(project.hasProperty('m4Smoke') ? 'craftable.m4Smoke' : 'craftable.m3Smoke', 'true')
         }
         // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
         systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
@@ -80,6 +80,12 @@ runs {
     server {
         systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         argument '--nogui'
+        if (project.hasProperty('m47Smoke')) {
+            modSource project.sourceSets.m3ClientTest
+            systemProperty 'craftable.m47Smoke', 'true'
+            arguments.addAll '--universe', project.layout.projectDirectory.dir('run/m47ServerSmoke').asFile.absolutePath,
+                    '--world', 'craftable-knowledge-smoke', '--port', '25585'
+        }
     }
 
     // This run config launches GameTestServer and runs all registered gametests, then exits.
@@ -100,6 +106,70 @@ runs {
     }
 }
 
+// NeoGradle tracks the shared asset directory as one task output. If a previous
+// download was interrupted, rerunning the task can remove otherwise valid
+// assets before attempting the download again. Preserve a cache that is already
+// complete according to Mojang's asset index; incomplete caches still use the
+// normal NeoGradle download path.
+def craftableAssetsRoot = new File(gradle.gradleUserHomeDir, 'caches/minecraft/assets')
+def craftableAssetIndex = new File(craftableAssetsRoot, 'indexes/asset-index.json')
+def craftableMinecraftAssetsComplete = false
+if (craftableAssetIndex.isFile()) {
+    try {
+        def objects = new groovy.json.JsonSlurper().parse(craftableAssetIndex).objects
+        craftableMinecraftAssetsComplete = objects && objects.values().every { entry ->
+            def hash = entry.hash as String
+            def objectFile = new File(craftableAssetsRoot, "objects/${hash.substring(0, 2)}/${hash}")
+            objectFile.isFile() && objectFile.length() == (entry.size as long)
+        }
+    } catch (Exception ignored) {
+        craftableMinecraftAssetsComplete = false
+    }
+}
+
+tasks.matching { it.name.endsWith('DownloadAssets') }.configureEach {
+    enabled = !craftableMinecraftAssetsComplete
+}
+
+// --rerun-tasks must not discard verified Mojang version files and replace
+// them with a partial network response. Invalid or missing files leave the
+// corresponding NeoGradle download task enabled.
+def craftableVersionCache = new File(projectDir, ".gradle/caches/minecraft/versions/${minecraft_version}")
+def craftableVersionMetadata = new File(craftableVersionCache, 'metadata.json')
+def craftableVerifiedVersionTasks = [:]
+if (craftableVersionMetadata.isFile()) {
+    try {
+        def downloads = new groovy.json.JsonSlurper().parse(craftableVersionMetadata).downloads
+        def candidates = [
+                "cacheVersionExecutableClient${minecraft_version}": ['client.jar', downloads.client],
+                "cacheVersionExecutableServer${minecraft_version}": ['server.jar', downloads.server],
+                "cacheVersionMappingsClient${minecraft_version}"  : ['client.txt', downloads.client_mappings],
+                "cacheVersionMappingsServer${minecraft_version}"  : ['server.txt', downloads.server_mappings],
+        ]
+        candidates.each { taskName, candidate ->
+            def cachedFile = new File(craftableVersionCache, candidate[0] as String)
+            def expected = candidate[1]
+            if (cachedFile.isFile() && cachedFile.length() == (expected.size as long)) {
+                def digest = java.security.MessageDigest.getInstance('SHA-1')
+                cachedFile.withInputStream { input ->
+                    byte[] buffer = new byte[8192]
+                    for (int read = input.read(buffer); read != -1; read = input.read(buffer)) {
+                        digest.update(buffer, 0, read)
+                    }
+                }
+                craftableVerifiedVersionTasks[taskName] =
+                        digest.digest().encodeHex().toString().equalsIgnoreCase(expected.sha1 as String)
+            }
+        }
+    } catch (Exception ignored) {
+        craftableVerifiedVersionTasks.clear()
+    }
+}
+
+tasks.matching { craftableVerifiedVersionTasks.containsKey(it.name) }.configureEach {
+    enabled = !craftableVerifiedVersionTasks[name]
+}
+
 // A normal client shutdown has exit code zero even after a caught assertion.
 // Make the opt-in harness fail the Gradle task unless its explicit pass marker exists.
 if (project.hasProperty('m3Smoke')) {
@@ -110,6 +180,28 @@ if (project.hasProperty('m3Smoke')) {
             if (!result.contains('M3_SMOKE PASS:') || result.contains('M3_SMOKE FAIL')) {
                 throw new GradleException('M3 client smoke failed; inspect run/client/logs/latest.log')
             }
+        }
+    }
+}
+
+if (project.hasProperty('m4Smoke')) {
+    def m4SmokeLog = layout.projectDirectory.file('run/client/logs/latest.log').asFile
+    tasks.matching { it.name == 'runClient' }.configureEach {
+        doLast {
+            def result = m4SmokeLog.exists() ? m4SmokeLog.getText('UTF-8') : ''
+            if (!result.contains('M4_SMOKE PASS:') || result.contains('M4_SMOKE FAIL'))
+                throw new GradleException('M4 client smoke failed; inspect run/client/logs/latest.log')
+        }
+    }
+}
+
+if (project.hasProperty('m47Smoke')) {
+    def knowledgeSmokeLog = layout.projectDirectory.file('run/server/logs/latest.log').asFile
+    tasks.matching { it.name == 'runServer' }.configureEach {
+        doLast {
+            def result = knowledgeSmokeLog.exists() ? knowledgeSmokeLog.getText('UTF-8') : ''
+            if (!result.contains('M47_SERVER_SMOKE PASS:') || result.contains('M47_SERVER_SMOKE FAIL'))
+                throw new GradleException('M4.7 server smoke failed; inspect run/server/logs/latest.log')
         }
     }
 }

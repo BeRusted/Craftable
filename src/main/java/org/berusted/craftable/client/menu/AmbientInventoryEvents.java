@@ -18,13 +18,13 @@ import org.berusted.craftable.Craftable;
 import org.berusted.craftable.client.ClientRequestSequence;
 import org.berusted.craftable.config.CraftableClientConfig;
 import org.berusted.craftable.network.OpenInventoryRequestPayload;
-import org.berusted.craftable.network.RecipeStatusResponsePayload;
+import org.berusted.craftable.config.EnvironmentScanSettings;
 
 @EventBusSubscriber(modid = Craftable.MOD_ID, value = Dist.CLIENT)
 public final class AmbientInventoryEvents {
     private static Screen requestedFrom;
     private static long requestedAt = Long.MIN_VALUE;
-    private static RecipeStatusResponsePayload rules;
+    private static EnvironmentScanSettings rules;
     private static net.minecraft.world.level.GameType observedMode;
     private static boolean openCreativeAfterClose;
     private AmbientInventoryEvents() {}
@@ -43,10 +43,10 @@ public final class AmbientInventoryEvents {
         PacketDistributor.sendToServer(new OpenInventoryRequestPayload(ClientRequestSequence.next()));
     }
 
-    public static void receiveRules(RecipeStatusResponsePayload payload) {
-        rules = payload;
+    public static void receiveRules(EnvironmentScanSettings settings, boolean workbench) {
+        rules = settings;
         var screen = Minecraft.getInstance().screen;
-        if (payload.craftingTable() && screen instanceof InventoryScreen) request(screen);
+        if (workbench && screen instanceof InventoryScreen) request(screen);
     }
 
     public static void clear() { requestedFrom = null; requestedAt = Long.MIN_VALUE; rules = null; observedMode = null; openCreativeAfterClose = false; }
@@ -128,6 +128,6 @@ public final class AmbientInventoryEvents {
     public static Component ruleSummary() {
         return rules == null ? Component.translatable("tooltip.craftable.rules_unknown")
                 : Component.translatable("tooltip.craftable.rules", rules.horizontalRadius(), rules.verticalRadius(),
-                    rules.previewTicks(), rules.enderChest());
+                    rules.previewCacheTicks(), rules.includeEnderChest());
     }
 }

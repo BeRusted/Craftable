@@ -26,6 +26,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.berusted.craftable.Craftable;
+import org.berusted.craftable.planner.CraftPlan;
 import org.berusted.craftable.api.CraftingResultCode;
 import org.berusted.craftable.environment.ContainerEndpoint;
 import org.berusted.craftable.environment.EndpointKind;
@@ -40,27 +41,40 @@ public final class M2GameTests {
     private static final BlockPos CHEST_POS = new BlockPos(1, 1, 1);
     private static final BlockPos TABLE_POS = new BlockPos(2, 1, 1);
 
+    private static final java.util.Map<java.util.UUID, Integer> ORIGINAL_RADII = new java.util.HashMap<>();
     private M2GameTests() {}
+
+    private static net.neoforged.neoforge.common.ModConfigSpec.IntValue radius() {
+        return org.berusted.craftable.config.CraftableServerConfig.SPEC.getValues().get("environment.horizontalRadius");
+    }
 
     @GameTest(templateNamespace = "minecraft", template = EMPTY_TEMPLATE)
     public static void constrainedIngredientAllocationDoesNotGreedilyConsumeExactMatch(GameTestHelper helper) {
-        SimpleContainer container = new SimpleContainer(
-                new ItemStack(Items.OAK_PLANKS),
-                new ItemStack(Items.BIRCH_PLANKS));
-        ContainerEndpoint endpoint = endpoint("allocation", container);
-
-        DirectCraftingPlanner.AllocatedGrid allocation = DirectCraftingPlanner.allocate(
-                List.of(
-                        Ingredient.of(Items.OAK_PLANKS, Items.BIRCH_PLANKS),
-                        Ingredient.of(Items.OAK_PLANKS)),
-                2,
-                0,
-                false,
-                List.of(endpoint));
-
-        helper.assertTrue(allocation != null, "Expected a valid allocation");
-        helper.assertTrue(allocation.gridItems().get(0).is(Items.BIRCH_PLANKS), "Broad ingredient used oak");
-        helper.assertTrue(allocation.gridItems().get(1).is(Items.OAK_PLANKS), "Exact ingredient lost oak");
+        ServerPlayer player = mockPlayer(helper);
+        var manager = helper.getLevel().getRecipeManager();
+        var original = List.copyOf(manager.getRecipes());
+        Object generation = new org.berusted.craftable.recipe.CraftingRecipes(player, true).generation();
+        try {
+            var inputs = net.minecraft.core.NonNullList.of(Ingredient.EMPTY,
+                    Ingredient.of(Items.OAK_PLANKS, Items.BIRCH_PLANKS), Ingredient.of(Items.OAK_PLANKS));
+            var custom = new net.minecraft.world.item.crafting.ShapelessRecipe("",
+                    net.minecraft.world.item.crafting.CraftingBookCategory.MISC, new ItemStack(Items.STICK), inputs);
+            var updated = new ArrayList<RecipeHolder<?>>(original);
+            updated.add(new RecipeHolder<>(id("m4_allocation_fixture"), custom));
+            manager.replaceRecipes(updated);
+            var catalog = new org.berusted.craftable.recipe.CraftingRecipes(player, true);
+            helper.assertTrue(catalog.generation() != generation, "Reload kept stale recipe index");
+            helper.assertTrue(catalog.generation()
+                    == new org.berusted.craftable.recipe.CraftingRecipes(player, true).generation(), "Index rebuilt without reload");
+            var result = M4PlanningGameTests.search(player, "m4_allocation_fixture", 1, false, true,
+                    new ItemStack(Items.OAK_PLANKS), new ItemStack(Items.BIRCH_PLANKS));
+            var grid = result.plan().orElseThrow().steps().getFirst().inputs();
+            helper.assertTrue(grid.get(0).is(Items.BIRCH_PLANKS), "Broad ingredient used oak");
+            helper.assertTrue(grid.get(1).is(Items.OAK_PLANKS), "Exact ingredient lost oak");
+        } finally {
+            manager.replaceRecipes(original);
+            removePlayer(player);
+        }
         helper.succeed();
     }
 
@@ -104,24 +118,24 @@ public final class M2GameTests {
         ItemStack output = new ItemStack(Items.STICK, 4);
         ItemStack remainder = new ItemStack(Items.BUCKET);
         ItemStack expected = source.getItem(0).copy();
-        DirectCraftingPlan plan = new DirectCraftingPlan(
+        CraftPlan plan = singlePlan(
                 recipe(helper, "stick"),
                 2,
                 grid,
                 output,
                 List.of(remainder),
-                List.of(new DirectCraftingPlan.Extraction(sourceEndpoint, 0, 2, expected)));
+                List.of(new CraftPlan.Extraction(sourceEndpoint.id(), 0, 2, expected)));
 
         grid.set(0, ItemStack.EMPTY);
         output.setCount(1);
         remainder.setCount(0);
         expected.setCount(1);
 
-        helper.assertTrue(plan.gridItems().get(0).is(Items.OAK_PLANKS), "Grid leaked caller mutation");
-        helper.assertValueEqual(plan.output().getCount(), 4, "copied output count");
-        helper.assertValueEqual(plan.remainingItems().getFirst().getCount(), 1, "copied remainder count");
+        helper.assertTrue(plan.steps().getFirst().inputs().get(0).is(Items.OAK_PLANKS), "Grid leaked caller mutation");
+        helper.assertValueEqual(plan.steps().getFirst().output().getCount(), 4, "copied output count");
+        helper.assertValueEqual(plan.steps().getFirst().remainders().getFirst().getCount(), 1, "copied remainder count");
         helper.assertValueEqual(
-                plan.extractions().getFirst().expectedStack().getCount(), 2, "copied fingerprint count");
+                plan.extractions().getFirst().expected().getCount(), 2, "copied fingerprint count");
         helper.succeed();
     }
 
@@ -134,7 +148,7 @@ public final class M2GameTests {
         player.getInventory().setItem(0, new ItemStack(Items.OAK_PLANKS, 2));
         ContainerEndpoint playerEndpoint = new ContainerEndpoint(
                 "capacity:player", EndpointKind.PLAYER, null, player.getInventory(), 0, 36);
-        DirectCraftingPlan plan = new DirectCraftingPlan(
+        CraftPlan plan = singlePlan(
                 recipe(helper, "stick"),
                 2,
                 List.of(
@@ -144,11 +158,12 @@ public final class M2GameTests {
                         ItemStack.EMPTY),
                 new ItemStack(Items.STICK, 4),
                 List.of(),
-                List.of(new DirectCraftingPlan.Extraction(
-                        playerEndpoint, 0, 2, player.getInventory().getItem(0))));
+                List.of(new CraftPlan.Extraction(
+                        playerEndpoint.id(), 0, 2, player.getInventory().getItem(0))));
         try {
             helper.assertTrue(
-                    MainInventoryInsertion.canFitAfterExtractions(player.getInventory(), plan),
+                    MainInventoryInsertion.simulate(player.getInventory(), plan,
+                            M4TransactionGameTests.snapshot(player, playerEndpoint), false).failure() == null,
                     "Consumed player slot was not counted as output capacity");
         } finally {
             removePlayer(player);
@@ -169,7 +184,7 @@ public final class M2GameTests {
         };
         NeoForge.EVENT_BUS.addListener(PlayerEvent.ItemCraftedEvent.class, listener);
         try {
-            CraftingResultCode result = DirectCraftingService.createOne(player, id("stick"));
+            CraftingResultCode result = createOne(player, id("stick"));
 
             helper.assertValueEqual(result, CraftingResultCode.CREATED, "crafting result");
             helper.assertValueEqual(count(player, Items.STICK), 4, "crafted sticks");
@@ -199,7 +214,7 @@ public final class M2GameTests {
         chest.setItem(5, new ItemStack(Items.WHEAT, 3));
         ServerPlayer player = mockPlayer(helper);
         try {
-            CraftingResultCode result = DirectCraftingService.createOne(player, id("cake"));
+            CraftingResultCode result = createOne(player, id("cake"));
 
             helper.assertValueEqual(result, CraftingResultCode.CREATED, "crafting result");
             helper.assertValueEqual(count(player, Items.CAKE), 1, "crafted cake");
@@ -220,7 +235,7 @@ public final class M2GameTests {
             player.getInventory().setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
         }
         try {
-            CraftingResultCode result = DirectCraftingService.createOne(player, id("stick"));
+            CraftingResultCode result = createOne(player, id("stick"));
 
             helper.assertValueEqual(result, CraftingResultCode.NO_OUTPUT_SPACE, "crafting result");
             helper.assertValueEqual(chest.countItem(Items.OAK_PLANKS), 2, "planks after rejected craft");
@@ -237,8 +252,8 @@ public final class M2GameTests {
         chest.setItem(0, new ItemStack(Items.OAK_PLANKS, 2));
         ServerPlayer player = mockPlayer(helper);
         try {
-            CraftingResultCode first = DirectCraftingService.createOne(player, id("stick"));
-            CraftingResultCode second = DirectCraftingService.createOne(player, id("stick"));
+            CraftingResultCode first = createOne(player, id("stick"));
+            CraftingResultCode second = createOne(player, id("stick"));
 
             helper.assertValueEqual(first, CraftingResultCode.CREATED, "first result");
             helper.assertValueEqual(second, CraftingResultCode.MISSING_INGREDIENTS, "second result");
@@ -257,7 +272,7 @@ public final class M2GameTests {
         SimpleContainer failing = new FailingRemovalContainer(new ItemStack(Items.OAK_PLANKS));
         ContainerEndpoint firstEndpoint = endpoint("rollback:first", first);
         ContainerEndpoint failingEndpoint = endpoint("rollback:failing", failing);
-        DirectCraftingPlan plan = new DirectCraftingPlan(
+        CraftPlan plan = singlePlan(
                 recipe(helper, "stick"),
                 2,
                 List.of(
@@ -268,10 +283,12 @@ public final class M2GameTests {
                 new ItemStack(Items.STICK, 4),
                 List.of(),
                 List.of(
-                        new DirectCraftingPlan.Extraction(firstEndpoint, 0, 1, first.getItem(0)),
-                        new DirectCraftingPlan.Extraction(failingEndpoint, 0, 1, failing.getItem(0))));
+                        new CraftPlan.Extraction(firstEndpoint.id(), 0, 1, first.getItem(0)),
+                        new CraftPlan.Extraction(failingEndpoint.id(), 0, 1, failing.getItem(0))));
         try {
-            CraftingResultCode result = DirectCraftingTransaction.execute(player, id("stick"), plan);
+            var snapshot = M4TransactionGameTests.snapshot(player, firstEndpoint, failingEndpoint);
+            CraftingResultCode result = CraftingTransaction.execute(player, plan, snapshot,
+                    MainInventoryInsertion.simulate(player.getInventory(), plan, snapshot, false));
 
             helper.assertValueEqual(result, CraftingResultCode.ENVIRONMENT_CHANGED, "crafting result");
             helper.assertValueEqual(first.countItem(Items.OAK_PLANKS), 1, "first restored container");
@@ -288,7 +305,7 @@ public final class M2GameTests {
         ServerPlayer player = mockPlayer(helper);
         SimpleContainer source = new SimpleContainer(new ItemStack(Items.OAK_PLANKS, 2));
         ContainerEndpoint sourceEndpoint = endpoint("fingerprint", source);
-        DirectCraftingPlan plan = new DirectCraftingPlan(
+        CraftPlan plan = singlePlan(
                 recipe(helper, "stick"),
                 2,
                 List.of(
@@ -298,10 +315,12 @@ public final class M2GameTests {
                         ItemStack.EMPTY),
                 new ItemStack(Items.STICK, 4),
                 List.of(),
-                List.of(new DirectCraftingPlan.Extraction(sourceEndpoint, 0, 2, source.getItem(0))));
+                List.of(new CraftPlan.Extraction(sourceEndpoint.id(), 0, 2, source.getItem(0))));
         source.setItem(0, new ItemStack(Items.BIRCH_PLANKS, 2));
         try {
-            CraftingResultCode result = DirectCraftingTransaction.execute(player, id("stick"), plan);
+            var snapshot = M4TransactionGameTests.snapshot(player, sourceEndpoint);
+            CraftingResultCode result = CraftingTransaction.execute(player, plan, snapshot,
+                    MainInventoryInsertion.simulate(player.getInventory(), plan, snapshot, false));
 
             helper.assertValueEqual(result, CraftingResultCode.ENVIRONMENT_CHANGED, "crafting result");
             helper.assertValueEqual(source.countItem(Items.BIRCH_PLANKS), 2, "changed source stack");
@@ -310,6 +329,19 @@ public final class M2GameTests {
             removePlayer(player);
         }
         helper.succeed();
+    }
+
+    private static CraftingResultCode createOne(ServerPlayer player, ResourceLocation recipe) {
+        return CraftingService.create(player, new org.berusted.craftable.planner.CraftRequest(recipe, 1,
+                false, false, org.berusted.craftable.planner.CraftRequest.PartialPolicy.EXPLICIT_SAFE, java.util.Map.of()),
+                false, new org.berusted.craftable.planner.SearchBudget(1_000_000_000L)).code();
+    }
+
+    private static CraftPlan singlePlan(RecipeHolder<CraftingRecipe> recipe, int size, List<ItemStack> grid,
+            ItemStack output, List<ItemStack> remainders, List<CraftPlan.Extraction> extractions) {
+        return new CraftPlan(recipe.id(), 1, 1,
+                List.of(new CraftPlan.Step(recipe, "0", size, grid, output, remainders)),
+                extractions, List.of(output), remainders, List.of(), false);
     }
 
     private static ChestBlockEntity prepareChest(GameTestHelper helper) {
@@ -324,13 +356,21 @@ public final class M2GameTests {
     private static ServerPlayer mockPlayer(GameTestHelper helper) {
         ServerPlayer player = helper.makeMockServerPlayerInLevel();
         player.setGameMode(net.minecraft.world.level.GameType.SURVIVAL);
+        // The vanilla empty template is tiny and neighboring tests can leave
+        // valid chests inside the default 8-block scan. This test asserts a
+        // particular chest was used, so isolate its synchronous fixture.
+        ORIGINAL_RADII.put(player.getUUID(), radius().get());
+        radius().set(2);
         BlockPos position = helper.absolutePos(PLAYER_POS);
         player.setPos(position.getX() + 0.5, position.getY(), position.getZ() + 0.5);
         return player;
     }
 
     private static void removePlayer(ServerPlayer player) {
+        Integer originalRadius = ORIGINAL_RADII.remove(player.getUUID());
+        if (originalRadius != null) radius().set(originalRadius);
         EnvironmentSnapshotService.remove(player.getUUID());
+        CraftingSessions.clear(player.getUUID());
         player.getServer().getPlayerList().remove(player);
     }
 

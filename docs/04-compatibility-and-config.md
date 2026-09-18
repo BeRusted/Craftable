@@ -100,7 +100,17 @@ Craftable 不开发独立的 JEI 风格主浏览器。第一阶段增强原版�
 
 `loadedChunksOnly=true` 是安全不变量，不开放为可关闭配置。当前扫描形状是水平/垂直分别限界的方盒；它不是欧式球体，不应在 UI 中误标为“欧式距离”。M1 没有为尚未实现的功能注册死配置。
 
+M4 已注册以下世界规则（`craftable-server.toml`），复用原配置页：
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `crafting.partialExecution` | `EXPLICIT_SAFE` | NEVER/CONFIRM/EXPLICIT_SAFE；只控制显式部分意图，单 C 永不部分消耗 |
+| `crafting.surplusDelivery` | `REQUIRE_SPACE` | 可改 DROP_OVERFLOW；主产物必须入包，仅溢出余料可以丢弃 |
+| `crafting.maxCraftBatch` | `64` | 1–64 次完整根配方；内部步骤另受 128 步上限 |
+
 ### 7.2 后续里程碑候选配置
+
+M4 的具体策略和预算以 [行为规格](14-m4-spec.md) 为准。仅已实现的部分完成策略、余料交付规则与已验证的批次上限进入同一配置页；深度/状态/毫秒等首先是开发取证参数，不自动变成允许玩家任意放大的开关。下表不代表现有注册键。
 
 | 键 | 建议默认 | 范围/值 | 说明 |
 |---|---:|---|---|
@@ -114,11 +124,9 @@ Craftable 不开发独立的 JEI 风格主浏览器。第一阶段增强原版�
 | `allowShearing` | `false` | 布尔 | M10；第一批显式白名单生物互动候选 |
 | `recipeVisibility` | `ALL` | `ALL/UNLOCKED_ONLY` | 是否尊重配方书解锁作为显示过滤；不改变服务端配方合法性 |
 | `instantProcessing` | `true` | 布尔 | 时间压缩总开关；整合包/公服可关闭 |
-| `partialExecution` | `AUTO_SAFE` | `NEVER/CONFIRM/AUTO_SAFE` | 部分完成策略上限 |
-| `maxCraftBatch` | `64` | 1–4096 | 一次请求的目标批量 |
-| `maxPlanDepth` | `12` | 1–64 | 递归深度 |
-| `maxPlanStates` | `20000` | 100–200000 | 搜索状态预算 |
-| `maxPlanMillis` | `20` | 1–40 | 单次同步规划预算，超出需分时 |
+| `maxPlanDepth` | `12` | M4.0 测量校准 | 初始内部深度上限，不作为玩家可任意放大配置 |
+| `maxPlanStates` | `2048` | M4.0 测量校准 | 初始内部展开上限，截断不能伪装材料不足 |
+| `maxPlanMillis` | `8` | M4.0 测量校准 | 主动规划软截止；被动预览按整批预算，另有限定全服准入 |
 | `scanPositionsPerTick` | `512` | 64–4096 | 环境扫描预算 |
 | `unknownPermissionPolicy` | `DENY` | `ALLOW/DENY` | 专用服务器建议 DENY |
 | `undoWindowSeconds` | `15` | 0–120 | 0 表示关闭撤销 |
@@ -126,13 +134,16 @@ Craftable 不开发独立的 JEI 风格主浏览器。第一阶段增强原版�
 
 这些键在所属功能实现前不注册，名称和范围仍可由性能测试修正。
 
-### 7.3 M1–M3 已实现的客户端配置
+### 7.3 M1–M4 已实现的客户端配置
 
 | 键 | 默认 | 说明 |
 |---|---:|---|
 | `presentation.recipeBookEnhancements` | `true` | 启用当前原版配方书入口；关闭后恢复原版判断 |
 | `presentation.detailedFailureFeedback` | `true` | 显示服务端结构化失败原因 |
 | `presentation.unlockedOnly` | `false` | M3：仅显示已解锁普通合成；关闭时显示同步目录，不授予配方 |
+| `crafting.partialPolicy` | `EXPLICIT_SAFE` | NEVER/CONFIRM/EXPLICIT_SAFE，与世界取更严格者 |
+| `crafting.allowSurplusDrops` | `true` | 仅表示遵循世界余料规则；false 时额外禁止溢出掉落 |
+| `crafting.doublePressMillis` | `350` | 150–800 ms，识别两次按下/释放；不包括长按重复事件 |
 
 以下是后续候选项，尚未注册：
 
@@ -143,16 +154,16 @@ Craftable 不开发独立的 JEI 风格主浏览器。第一阶段增强原版�
 | `showPlanPreview` | `true` | 显示消耗与工作站 |
 | `feedbackDetail` | `NORMAL` | 简洁/普通/调试 |
 | `rememberRecipeChoice` | `true` | 记住同一输出的配方偏好 |
-| `confirmPartialExecution` | `false` | 服务端允许自动时客户端仍可要求确认 |
 | `showEnvironmentIndicator` | `true` | 显示工作台/炉/容器可用状态 |
 | `feedbackMode` | `NORMAL` | `NORMAL/QUIET`；控制客户端展示密度，不改变服务端结果 |
 | `narrateCraftingFailures` | `true` | 允许旁白读取主动操作的失败原因 |
 
 键位通过标准 KeyMapping 注册并允许玩家在控制设置中修改：
 
-- `Create One`：默认 `C`；
-- `Undo Last Craft`：默认 `Z`；
-- `Create Max`：默认不绑定，避免与其他模组冲突。
+- `Create One`：默认 `C`，只尝试完整一次；同目标第一次失败后的双击才表达部分意图，详见 [交互契约](16-m4-interaction-and-performance.md)；
+- `Plan Details`：M4 使用 Shift+已绑定的 Create One 键（默认 Shift+C），只打开工作站状态与可编辑物品链页，滑槽选择次数/MAX 后确认，不立即批量消耗；没有第二个独立键位绑定；
+- `Undo Last Craft`：第二阶段默认 `Z`，M4 不注册未实现能力；
+- `Create Max`：M4 不新增直接执行键，通过详情选择；后续独立快捷键另行评估。
 
 `C` 和 `Z` 只在支持的屏幕上下文、存在有效悬停目标或撤销令牌时消费，不能妨碍聊天框和搜索框输入。
 

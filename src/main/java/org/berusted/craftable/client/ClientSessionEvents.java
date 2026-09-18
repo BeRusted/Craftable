@@ -14,7 +14,16 @@ public final class ClientSessionEvents {
     private ClientSessionEvents() {}
 
     @SubscribeEvent
+    public static void onTagsUpdated(net.neoforged.neoforge.event.TagsUpdatedEvent event) {
+        // In an integrated game the same event bus also sees server loading.
+        // Only the received client binding invalidates this client's graph.
+        if (event.getUpdateCause() == net.neoforged.neoforge.event.TagsUpdatedEvent.UpdateCause.CLIENT_PACKET_RECEIVED)
+            org.berusted.craftable.client.recipebook.ClientBrowsePlanner.recipesChanged();
+    }
+
+    @SubscribeEvent
     public static void onRecipesUpdated(net.neoforged.neoforge.client.event.RecipesUpdatedEvent event) {
+        org.berusted.craftable.client.recipebook.ClientBrowsePlanner.recipesChanged();
         ClientRecipeStatusStore.clear();
         ClientRecipeStatusStore.invalidate(ClientRequestSequence.next());
         RecipeBookStatusHandler.clearRequestState();
@@ -31,6 +40,7 @@ public final class ClientSessionEvents {
     }
 
     private static void clearSessionState() {
+        org.berusted.craftable.client.recipebook.ClientBrowsePlanner.disconnect();
         ClientRecipeStatusStore.clear();
         org.berusted.craftable.client.menu.AmbientInventoryEvents.clear();
         RecipeBookStatusHandler.clearRequestState();

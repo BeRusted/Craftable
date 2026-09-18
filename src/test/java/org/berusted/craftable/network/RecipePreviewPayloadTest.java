@@ -12,6 +12,17 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class RecipePreviewPayloadTest {
     private static final ResourceLocation ID = ResourceLocation.withDefaultNamespace("stick");
+    @Test void deferredAdmissionAcknowledgesOnlyRequestIdentity() {
+        var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
+        try {
+            var response = RecipeStatusResponsePayload.deferred(42);
+            RecipeStatusResponsePayload.STREAM_CODEC.encode(buffer, response);
+            var decoded = RecipeStatusResponsePayload.STREAM_CODEC.decode(buffer);
+            assertEquals(42, decoded.requestId());
+            assertTrue(decoded.entries().isEmpty());
+            assertTrue(decoded.environmentGeneration() < 0);
+        } finally { buffer.release(); }
+    }
     @Test void requestAndResponseRoundTripAndBoundSize() {
         var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
         try {

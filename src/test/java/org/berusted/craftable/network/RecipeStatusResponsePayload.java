@@ -9,7 +9,7 @@ import org.berusted.craftable.Craftable;
 import org.berusted.craftable.api.CraftingResultCode;
 import org.berusted.craftable.api.CraftingStatus;
 
-/** All entries share one snapshot. Only effective rules and statuses cross the wire. */
+/** Protocol 6 regression fixture; no production network registration. */
 public record RecipeStatusResponsePayload(List<Entry> entries, long requestId, long environmentGeneration,
         boolean craftingTable, int horizontalRadius, int verticalRadius, int previewTicks, boolean enderChest)
         implements CustomPacketPayload {
@@ -18,6 +18,10 @@ public record RecipeStatusResponsePayload(List<Entry> entries, long requestId, l
         if (entries.size() > RecipeStatusRequestPayload.MAX_RECIPES) throw new IllegalArgumentException("Oversized recipe preview response");
     }
     public record Entry(ResourceLocation recipeId, CraftingStatus status, CraftingResultCode resultCode) {}
+    /** Negative generation is an admission ACK only, never environment evidence. */
+    public static RecipeStatusResponsePayload deferred(long requestId) {
+        return new RecipeStatusResponsePayload(List.of(), requestId, -1, false, 0, 0, 0, false);
+    }
     public static final Type<RecipeStatusResponsePayload> TYPE = new Type<>(Craftable.id("recipe_status_response"));
     public static final StreamCodec<RegistryFriendlyByteBuf, RecipeStatusResponsePayload> STREAM_CODEC = CustomPacketPayload.codec(
             (payload, buffer) -> {
