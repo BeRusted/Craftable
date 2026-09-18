@@ -8,7 +8,7 @@ import net.minecraft.client.gui.screens.recipebook.RecipeCollection;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import org.berusted.craftable.client.mixin.RecipeBookComponentAccessor;
-import org.berusted.craftable.config.CraftableClientConfig;
+import org.berusted.craftable.client.config.CraftableConfigHandler;
 
 import java.util.List;
 import java.util.Locale;
@@ -27,7 +27,7 @@ public final class RecipeBookProjection {
     }
 
     public static boolean active() {
-        return !restoring && modeAllowed() && CraftableClientConfig.recipeBookEnhancementsEnabled()
+        return !restoring && modeAllowed() && CraftableConfigHandler.recipeBookEnhancementsEnabled()
                 && component(Minecraft.getInstance().screen) != null;
     }
 
@@ -55,7 +55,7 @@ public final class RecipeBookProjection {
         var mc = Minecraft.getInstance();
         return recipe.value() instanceof CraftingRecipe && !recipe.value().isSpecial()
                 && !recipe.value().isIncomplete() && recipe.value().canCraftInDimensions(3, 3)
-                && (!CraftableClientConfig.unlockedOnly() || mc.player.getRecipeBook().contains(recipe));
+                && (!CraftableConfigHandler.unlockedOnly() || mc.player.getRecipeBook().contains(recipe));
     }
 
     public static List<RecipeHolder<?>> candidates(RecipeCollection collection) {

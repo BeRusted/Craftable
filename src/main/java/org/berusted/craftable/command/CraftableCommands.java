@@ -74,7 +74,7 @@ public final class CraftableCommands {
 
             source.sendSuccess(
                     () -> Component.translatable(
-                            "command.craftable.environment.endpoint",
+                            "command.environment.endpoint",
                             endpoint.id(),
                             endpoint.slotCount(),
                             summary.occupiedSlots(),
@@ -91,7 +91,7 @@ public final class CraftableCommands {
 
             source.sendSuccess(
                     () -> Component.translatable(
-                            "command.craftable.environment.workstation",
+                            "command.environment.workstation",
                             workstation.id(),
                             workstation.capability().name()
                     ),
@@ -108,7 +108,7 @@ public final class CraftableCommands {
 
             source.sendSuccess(
                     () -> Component.translatable(
-                            "command.craftable.environment.truncated",
+                            "command.environment.truncated",
                             omitted
                     ),
                     false
@@ -122,7 +122,7 @@ public final class CraftableCommands {
             EnvironmentSnapshot snapshot
     ) {
         return Component.translatable(
-                "command.craftable.environment.summary",
+                "command.environment.summary",
                 snapshot.generation(),
                 snapshot.dimension().location().toString(),
                 position(snapshot),

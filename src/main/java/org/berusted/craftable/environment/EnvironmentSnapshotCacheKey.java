@@ -2,7 +2,7 @@ package org.berusted.craftable.environment;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
-import org.berusted.craftable.config.EnvironmentScanSettings;
+import org.berusted.craftable.config.CraftableServerConfigHandler.EnvironmentScanSettings;
 
 record EnvironmentSnapshotCacheKey(
         ResourceLocation dimension,

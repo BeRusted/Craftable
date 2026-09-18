@@ -1,13 +1,12 @@
 package org.berusted.craftable.client.network;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.Minecraft;
 import org.berusted.craftable.client.ClientRequestSequence;
 import org.berusted.craftable.client.CraftableFeedback;
 import org.berusted.craftable.client.menu.AmbientInventoryEvents;
 import org.berusted.craftable.client.recipebook.ClientRecipeStatusStore;
 import org.berusted.craftable.client.recipebook.RecipeBookStatusHandler;
-import org.berusted.craftable.config.CraftableClientConfig;
+import org.berusted.craftable.client.config.CraftableConfigHandler;
 import org.berusted.craftable.network.payload.CreateRecipeResultPayload;
 import org.berusted.craftable.network.payload.RecipeStatusResponsePayload;
 
@@ -59,7 +58,7 @@ public final class ClientPayloadHandler {
 
         CraftableFeedback.showCreateResult(
                 payload.resultCode(),
-                CraftableClientConfig.detailedFailureFeedbackEnabled()
+                CraftableConfigHandler.detailedFailureFeedbackEnabled()
         );
     }
 
