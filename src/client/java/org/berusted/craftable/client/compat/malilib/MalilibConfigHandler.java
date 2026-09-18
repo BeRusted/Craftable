@@ -40,9 +40,9 @@ public class MalilibConfigHandler implements IConfigHandler {
     }
 
     public static class Generic {
-        public static final ConfigBoolean recipeBookEnhancements = new ConfigBoolean("recipe_book_enhancements", true, "null").apply(GENERIC_KEY);
-        public static final ConfigBoolean detailedFailureFeedback = new ConfigBoolean("detailed_failure_feedback", true, "null").apply(GENERIC_KEY);
-        public static final ConfigBoolean unlockedOnly = new ConfigBoolean("unlocked_only", false, "null").apply(GENERIC_KEY);
+        public static final ConfigBoolean recipeBookEnhancements = new ConfigBoolean("recipe_book_enhancements", true, "craftable.config.generic.comment.recipe_book_enhancement").apply(GENERIC_KEY);
+        public static final ConfigBoolean detailedFailureFeedback = new ConfigBoolean("detailed_failure_feedback", true, "craftable.config.generic.comment.detailed_failure_feedback").apply(GENERIC_KEY);
+        public static final ConfigBoolean unlockedOnly = new ConfigBoolean("unlocked_only", false, "craftable.config.generic.comment.unlocked_only").apply(GENERIC_KEY);
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 recipeBookEnhancements,
