@@ -91,6 +91,9 @@ public final class RecipeButtonTargetResolver {
                 return index;
             }
         }
+        for (int index = 0; index < statuses.size(); index++) {
+            if (statuses.get(index) == CraftingStatus.PARTIAL) return index;
+        }
         // Before the first server response, preserve vanilla's own positive
         // choice where possible; otherwise retain the currently shown variant.
         for (int index = 0; index < vanillaCraftable.size(); index++) {

@@ -7,6 +7,7 @@ import java.util.function.Predicate;
 import net.minecraft.resources.ResourceLocation;
 
 /** Fair, bounded selection. Hidden candidates cannot starve behind a continually changing visible page. */
+// Protocol 6 baseline fixture; the production scheduler uses continuations.
 final class PreviewRequestQueue {
     private int cursor;
     private int foregroundCursor;
