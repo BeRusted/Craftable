@@ -107,13 +107,13 @@ public abstract class RecipeButtonMixin extends AbstractWidget {
         var lifecycle = RecipeButtonTargetResolver.lifecycle(button);
         if (lifecycle != ClientRecipeStatusStore.Lifecycle.UNKNOWN) {
             var status = RecipeButtonTargetResolver.status(button);
-            Component label = Component.translatable("status.craftable." + status.name().toLowerCase(java.util.Locale.ROOT));
+            Component label = Component.translatable("status." + status.name().toLowerCase(java.util.Locale.ROOT));
             ci.getReturnValue().add(status == CraftingStatus.BLOCKED
-                    ? Component.translatable("tooltip.craftable.blocked_reason", label, Component.translatable("reason.craftable." +
+                    ? Component.translatable("tooltip.blocked_reason", label, Component.translatable("reason." +
                         ClientRecipeStatusStore.reason(RecipeButtonTargetResolver.preferredRecipe(button).id()).name().toLowerCase(java.util.Locale.ROOT)))
                     : label);
         }
-        if (lifecycle != ClientRecipeStatusStore.Lifecycle.KNOWN) ci.getReturnValue().add(Component.translatable("tooltip.craftable.pending"));
-        ci.getReturnValue().add(Component.translatable("tooltip.craftable.create_one"));
+        if (lifecycle != ClientRecipeStatusStore.Lifecycle.KNOWN) ci.getReturnValue().add(Component.translatable("tooltip.pending"));
+        ci.getReturnValue().add(Component.translatable("tooltip.create_one"));
     }
 }

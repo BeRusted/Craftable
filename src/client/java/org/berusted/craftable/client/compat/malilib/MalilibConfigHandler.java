@@ -4,7 +4,6 @@ import com.google.common.collect.ImmutableList;
 import fi.dy.masa.malilib.config.IConfigBase;
 import fi.dy.masa.malilib.config.IConfigHandler;
 import fi.dy.masa.malilib.config.options.ConfigBoolean;
-import org.berusted.craftable.Craftable;
 import org.berusted.craftable.client.config.CraftableConfigHandler;
 
 /**
@@ -14,7 +13,7 @@ import org.berusted.craftable.client.config.CraftableConfigHandler;
  */
 public class MalilibConfigHandler implements IConfigHandler {
 
-    private static final String GENERIC_KEY = Craftable.MOD_ID + ".config.generic";
+    private static final String GENERIC_KEY = "config.generic";
 
     /**
      * 把配置核心的当前值投影到 malilib 选项上（打开界面前显示的是真实生效值）。
@@ -40,9 +39,9 @@ public class MalilibConfigHandler implements IConfigHandler {
     }
 
     public static class Generic {
-        public static final ConfigBoolean recipeBookEnhancements = new ConfigBoolean("recipe_book_enhancements", true, "craftable.config.generic.comment.recipe_book_enhancement").apply(GENERIC_KEY);
-        public static final ConfigBoolean detailedFailureFeedback = new ConfigBoolean("detailed_failure_feedback", true, "craftable.config.generic.comment.detailed_failure_feedback").apply(GENERIC_KEY);
-        public static final ConfigBoolean unlockedOnly = new ConfigBoolean("unlocked_only", false, "craftable.config.generic.comment.unlocked_only").apply(GENERIC_KEY);
+        public static final ConfigBoolean recipeBookEnhancements = new ConfigBoolean("recipe_book_enhancements", true, "config.generic.comment.recipe_book_enhancements").apply(GENERIC_KEY);
+        public static final ConfigBoolean detailedFailureFeedback = new ConfigBoolean("detailed_failure_feedback", true, "config.generic.comment.detailed_failure_feedback").apply(GENERIC_KEY);
+        public static final ConfigBoolean unlockedOnly = new ConfigBoolean("unlocked_only", false, "config.generic.comment.unlocked_only").apply(GENERIC_KEY);
 
         public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
                 recipeBookEnhancements,

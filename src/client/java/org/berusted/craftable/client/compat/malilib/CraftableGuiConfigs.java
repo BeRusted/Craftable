@@ -18,7 +18,7 @@ public class CraftableGuiConfigs extends GuiConfigsBase {
     public static ConfigGuiTab tab = ConfigGuiTab.GENERIC;
 
     public CraftableGuiConfigs() {
-        super(10, 50, CraftableClient.MOD_ID, null, "craftable.config.title", String.format("%s", "0.0.1"));
+        super(10, 50, CraftableClient.MOD_ID, null, "config.title", String.format("%s", "0.0.1"));
     }
 
     @Override
@@ -72,7 +72,7 @@ public class CraftableGuiConfigs extends GuiConfigsBase {
     }
 
     public enum ConfigGuiTab {
-        GENERIC("craftable.config.title.generic");
+        GENERIC("config.generic.title");
 
         private final String translationKey;
 

@@ -23,9 +23,9 @@ public final class CraftableFeedback {
         }
 
         String messageKey = detailed
-                ? "message.craftable.create."
+                ? "message.create."
                 + resultCode.name().toLowerCase(Locale.ROOT)
-                : "message.craftable.create.failed";
+                : "message.create.failed";
 
         Minecraft minecraft = Minecraft.getInstance();
 
@@ -33,7 +33,7 @@ public final class CraftableFeedback {
                 minecraft.getToasts(),
                 CREATE_FAILURE,
                 Component.translatable(
-                        "toast.craftable.create.failed.title"
+                        "toast.create.failed.title"
                 ),
                 Component.translatable(messageKey)
         );
