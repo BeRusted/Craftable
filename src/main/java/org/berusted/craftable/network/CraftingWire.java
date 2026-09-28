@@ -15,6 +15,72 @@ public final class CraftingWire {
     static final int MAX_DETAIL_BYTES = 65536;
     private CraftingWire() {}
 
+    static void writeFrame(RegistryFriendlyByteBuf outer, java.util.function.Consumer<RegistryFriendlyByteBuf> encoder) {
+        var body = new RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(1024, MAX_DETAIL_BYTES - 3), outer.registryAccess());
+        try { encoder.accept(body); outer.writeVarInt(body.readableBytes()); outer.writeBytes(body); }
+        finally { body.release(); }
+    }
+
+    static <T> T readFrame(RegistryFriendlyByteBuf outer, java.util.function.Function<RegistryFriendlyByteBuf, T> decoder) {
+        var body = new RegistryFriendlyByteBuf(outer.readSlice(count(outer, MAX_DETAIL_BYTES - 3)), outer.registryAccess());
+        T result = decoder.apply(body);
+        if (body.isReadable()) throw new IllegalArgumentException("Trailing action frame data");
+        return result;
+    }
+
+    /** Length-delimit before parsing or allocating any route structures. Only
+     * ordinary default-component, count-one ingredients are supported: there
+     * is no untrusted NBT/component decoder on this execution witness path. */
+    static void witness(RegistryFriendlyByteBuf outer, CraftPlan.Witness witness) {
+        outer.writeBoolean(witness != null);
+        if (witness == null) return;
+        var body = new RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(1024, MAX_DETAIL_BYTES), outer.registryAccess());
+        try {
+            body.writeUUID(witness.session()); body.writeVarLong(witness.recipes()); body.writeVarLong(witness.resources());
+            body.writeVarInt(witness.steps().size());
+            for (var step : witness.steps()) {
+                body.writeUtf(step.recipe().toString(), 512); body.writeUtf(step.path(), 32);
+                var inputs = step.inputs(); body.writeVarInt(inputs.size());
+                for (int i = 0; i < inputs.size(); i++) {
+                    var stack = inputs.get(i);
+                    if (org.berusted.craftable.recipe.CraftingRecipes.protectedStack(stack))
+                        throw new IllegalArgumentException("Unsupported witness components");
+                    body.writeUtf(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), 512);
+                    body.writeVarInt(step.origins().get(i)); body.writeUUID(step.references().get(i));
+                }
+            }
+            outer.writeVarInt(body.readableBytes()); outer.writeBytes(body);
+        } finally { body.release(); }
+    }
+
+    static CraftPlan.Witness witness(RegistryFriendlyByteBuf outer) {
+        if (!outer.readBoolean()) return null;
+        int length = count(outer, MAX_DETAIL_BYTES);
+        var body = new RegistryFriendlyByteBuf(outer.readSlice(length), outer.registryAccess());
+        var session = body.readUUID(); long recipes = body.readVarLong(), resources = body.readVarLong();
+        int size = count(body, org.berusted.craftable.planner.SearchBudget.MAX_STEPS);
+        var steps = new ArrayList<CraftPlan.WitnessStep>(size);
+        for (int i = 0; i < size; i++) {
+            var recipe = net.minecraft.resources.ResourceLocation.parse(body.readUtf(512));
+            String path = body.readUtf(32);
+            int slots = count(body, 9);
+            if (slots != 4 && slots != 9) throw new IllegalArgumentException("Invalid witness grid");
+            var inputs = new ArrayList<ItemStack>(slots);
+            var origins = new ArrayList<Integer>(slots);
+            var references = new ArrayList<java.util.UUID>(slots);
+            for (int slot = 0; slot < slots; slot++) {
+                var id = net.minecraft.resources.ResourceLocation.parse(body.readUtf(512));
+                if (!net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(id))
+                    throw new IllegalArgumentException("Unknown witness item");
+                inputs.add(new ItemStack(net.minecraft.core.registries.BuiltInRegistries.ITEM.get(id)));
+                origins.add(body.readVarInt()); references.add(body.readUUID());
+            }
+            steps.add(new CraftPlan.WitnessStep(recipe, path, inputs, origins, references));
+        }
+        if (body.isReadable()) throw new IllegalArgumentException("Trailing witness data");
+        return new CraftPlan.Witness(session, recipes, resources, steps);
+    }
+
     public static final int SNAPSHOT_BYTES = 4 * 1024 * 1024;
     public static final int SNAPSHOT_CHUNK_BYTES = 31 * 1024;
     public static final int SNAPSHOT_CHUNKS = (SNAPSHOT_BYTES + SNAPSHOT_CHUNK_BYTES - 1) / SNAPSHOT_CHUNK_BYTES;
@@ -284,24 +350,24 @@ public final class CraftingWire {
     }
 
     static void request(RegistryFriendlyByteBuf buffer, CraftRequest request) {
-        buffer.writeResourceLocation(request.recipe());
+        buffer.writeUtf(request.recipe().toString(), 512);
         buffer.writeVarInt(request.batches());
         buffer.writeBoolean(request.partial());
         buffer.writeBoolean(request.allowDrops());
         buffer.writeEnum(request.policy());
         buffer.writeVarInt(request.selections().size());
-        request.selections().forEach((path, recipe) -> { buffer.writeUtf(path, 32); buffer.writeResourceLocation(recipe); });
+        request.selections().forEach((path, recipe) -> { buffer.writeUtf(path, 32); buffer.writeUtf(recipe.toString(), 512); });
     }
 
     static CraftRequest request(RegistryFriendlyByteBuf buffer) {
-        var recipe = buffer.readResourceLocation();
+        var recipe = net.minecraft.resources.ResourceLocation.parse(buffer.readUtf(512));
         int batches = count(buffer, CraftRequest.MAX_BATCHES);
         boolean partial = buffer.readBoolean(), drops = buffer.readBoolean();
         var policy = buffer.readEnum(CraftRequest.PartialPolicy.class);
         int count = count(buffer, CraftRequest.MAX_SELECTIONS);
         var selections = new java.util.TreeMap<String, net.minecraft.resources.ResourceLocation>();
         for (int i = 0; i < count; i++) {
-            if (selections.put(buffer.readUtf(32), buffer.readResourceLocation()) != null)
+            if (selections.put(buffer.readUtf(32), net.minecraft.resources.ResourceLocation.parse(buffer.readUtf(512))) != null)
                 throw new IllegalArgumentException("Duplicate selection");
         }
         return new CraftRequest(recipe, batches, partial, drops, policy, selections);

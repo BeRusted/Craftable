@@ -68,4 +68,18 @@ class CraftingDetailPayloadTest {
             assertThrows(RuntimeException.class, () -> CraftingDetailPayloads.PreviewResponse.CODEC.decode(buffer));
         } finally { buffer.release(); }
     }
+
+    @Test void witnessEnvelopeRejectsOversizeAndTruncationBeforeParsing() {
+        var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
+        try {
+            buffer.writeVarInt(65536);
+            assertThrows(IllegalArgumentException.class, () -> CraftingDetailPayloads.PreviewRequest.CODEC.decode(buffer));
+            buffer.clear(); buffer.writeVarInt(65536);
+            assertThrows(IllegalArgumentException.class, () -> CraftingDetailPayloads.ConfirmRequest.CODEC.decode(buffer));
+            buffer.clear(); buffer.writeVarInt(100); buffer.writeByte(0);
+            assertThrows(IndexOutOfBoundsException.class, () -> CraftingDetailPayloads.PreviewRequest.CODEC.decode(buffer));
+            buffer.clear(); buffer.writeBoolean(true); buffer.writeVarInt(65537);
+            assertThrows(IllegalArgumentException.class, () -> CraftingWire.witness(buffer));
+        } finally { buffer.release(); }
+    }
 }

@@ -103,7 +103,7 @@ public final class ResourceLedger {
 
     int origin(Taken taken) { return taken == null || taken.source >= 0 ? -1 : generated.get(taken.lot).origin; }
 
-    int produce(ItemStack stack, boolean terminal, boolean remainder, String path, int origin) {
+    public int produce(ItemStack stack, boolean terminal, boolean remainder, String path, int origin) {
         if (stack.isEmpty()) return -1;
         if (generated.size() >= SearchBudget.MAX_STEPS * 10) throw new IllegalStateException("Generated lot limit");
         generated.add(new Lot(stack.copyWithCount(1), stack.getCount(), 0, terminal, terminal, remainder, path, origin));
@@ -117,7 +117,7 @@ public final class ResourceLedger {
                 ? new Taken(-1, lot, entry.stack.copyWithCount(1)) : null;
     }
 
-    List<CraftPlan.Extraction> extractions() {
+    public List<CraftPlan.Extraction> extractions() {
         List<CraftPlan.Extraction> result = new ArrayList<>();
         for (int i = 0; i < sources.size(); i++) {
             if (consumed[i] > 0) {
@@ -128,7 +128,7 @@ public final class ResourceLedger {
         return List.copyOf(result);
     }
 
-    List<ItemStack> delivery(boolean primary) {
+    public List<ItemStack> delivery(boolean primary) {
         List<ItemStack> result = new ArrayList<>();
         for (Lot lot : generated) {
             int count = Math.addExact(lot.available, lot.reserved);
@@ -170,6 +170,35 @@ public final class ResourceLedger {
                 lots.entrySet().stream().map(e -> List.of(e.getKey(), e.getValue())).toList());
     }
 
+    /** Replay one concrete binding through the very same accounting as search.
+     * A null physical reference selects the first matching source (client export
+     * only); server validation supplies the authorized opaque reference. */
+    public Binding consume(ItemStack stack, int origin, String reference) {
+        if (stack.isEmpty() || stack.getCount() != 1 || CraftingRecipes.protectedStack(stack))
+            throw new IllegalArgumentException("Invalid bound ingredient");
+        if (origin >= 0) {
+            for (int i = 0; i < generated.size(); i++) {
+                var lot = generated.get(i);
+                if (lot.origin == origin && !lot.terminal && lot.available > 0
+                        && ItemStack.isSameItemSameComponents(lot.stack, stack)) {
+                    take(new Taken(-1, i, stack));
+                    return new Binding(null, lot.remainder);
+                }
+            }
+        } else {
+            for (int i = 0; i < sources.size(); i++) {
+                var source = sources.get(i);
+                if (available[i] > 0 && (reference == null || reference.equals(source.endpointId))
+                        && ItemStack.isSameItemSameComponents(source.stack, stack)) {
+                    take(new Taken(i, -1, stack));
+                    return new Binding(source.endpointId, false);
+                }
+            }
+        }
+        throw new IllegalArgumentException("Unfunded ingredient");
+    }
+
+    public record Binding(String reference, boolean remainder) {}
     record Taken(int source, int lot, ItemStack stack) {}
     record Key(Item item, DataComponentPatch components) {
         static Key of(ItemStack stack) { return new Key(stack.getItem(), stack.getComponentsPatch()); }

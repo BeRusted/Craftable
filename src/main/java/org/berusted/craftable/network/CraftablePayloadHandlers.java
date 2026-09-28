@@ -144,7 +144,8 @@ public final class CraftablePayloadHandlers {
                 result = CraftingDetailPayloads.failed(CraftingResultCode.REQUEST_THROTTLED);
                 if (CraftableRequestLimiter.allowDetail(player.getUUID(), player.level().getGameTime()))
                     try (var lease = CraftableRequestLimiter.planning(player.getServer(), player.getUUID(), true)) {
-                        if (lease.allowed()) result = CraftingService.preview(player, payload.request(), payload.choicePath());
+                        if (lease.allowed()) result = CraftingService.preview(player, payload.request(), payload.choicePath(),
+                                payload.witness(), payload.revision());
                     }
             }
             context.reply(new CraftingDetailPayloads.PreviewResponse(payload.menuId(), payload.revision(), result));
@@ -180,7 +181,7 @@ public final class CraftablePayloadHandlers {
             if (CraftableRequestLimiter.allowCreate(player.getUUID(), player.level().getGameTime()))
                 try (var lease = CraftableRequestLimiter.planning(player.getServer(), player.getUUID(), true)) {
                     if (lease.allowed()) {
-                        var result = CraftingService.confirm(player, payload.token());
+                        var result = CraftingService.confirm(player, payload.token(), payload.witness(), payload.revision());
                         var target = result.plan() == null ? payload.recipe() : result.plan().target();
                         context.reply(CreateRecipeResultPayload.from(target, payload.revision(), result));
                         return;

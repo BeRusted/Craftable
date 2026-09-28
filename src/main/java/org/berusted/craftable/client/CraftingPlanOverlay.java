@@ -54,6 +54,7 @@ public final class CraftingPlanOverlay extends Screen {
     private boolean dirty = true;
     private boolean localDraft;
     private Object reviewedIdentity;
+    private org.berusted.craftable.planner.CraftPlan.Witness submittedWitness;
     private long resourceScope = -1;
     private long unavailableSince;
     private boolean fallbackUsed;
@@ -261,10 +262,11 @@ public final class CraftingPlanOverlay extends Screen {
         }
         if (localDraft) {
             reviewedIdentity = draft.view().reviewIdentity();
-            // This is the single explicit server planning request, not passive
-            // browsing. M4.9 will replace it with witness validation.
+            submittedWitness = ClientBrowsePlanner.witness(intent);
+            // Complete fixed-quantity routes are validated, not re-searched.
+            // Partial/unsupported local plans retain explicit server planning.
             PacketDistributor.sendToServer(new CraftingDetailPayloads.PreviewRequest(
-                    minecraft.player.containerMenu.containerId, begin(Work.AUTHORIZE), intent, ""));
+                    minecraft.player.containerMenu.containerId, begin(Work.AUTHORIZE), intent, "", submittedWitness));
             controls();
             return;
         }
@@ -274,7 +276,7 @@ public final class CraftingPlanOverlay extends Screen {
     private void confirm() {
         long sequence = begin(Work.CONFIRM);
         PacketDistributor.sendToServer(new CraftingDetailPayloads.ConfirmRequest(
-                minecraft.player.containerMenu.containerId, sequence, intent.recipe(), draft.token()));
+                minecraft.player.containerMenu.containerId, sequence, intent.recipe(), draft.token(), submittedWitness));
         controls();
     }
 
@@ -370,6 +372,7 @@ public final class CraftingPlanOverlay extends Screen {
         boolean sameReview = work == Work.AUTHORIZE && self.reviewedIdentity != null
                 && self.reviewedIdentity.equals(payload.draft().view().reviewIdentity());
         self.draft = payload.draft();
+        if (work != Work.AUTHORIZE) self.submittedWitness = null;
         self.localDraft = local;
         var route = payload.draft().view().operations().stream().map(o -> (Object) List.of(o.path(), o.recipe())).distinct().toList();
         if (self.intent.batches() == 1 && self.singleRoute.isEmpty()) self.singleRoute = route;
@@ -482,8 +485,7 @@ public final class CraftingPlanOverlay extends Screen {
 
     @Override public void render(GuiGraphics g, int mx, int my, float partialTick) {
         super.render(g, mx, my, partialTick);
-        if (draft != null && draft.view().workbench()) {
-            g.fill(18, 18, 42, 42, 0xD0202020);
+        if (pane == Pane.GRAPH && draft != null && draft.view().workbench()) {
             g.renderItem(new ItemStack(Items.CRAFTING_TABLE), 22, 22);
             if (mx >= 18 && mx < 42 && my >= 18 && my < 42)
                 g.renderTooltip(font, new ItemStack(Items.CRAFTING_TABLE), mx, my);
@@ -523,12 +525,13 @@ public final class CraftingPlanOverlay extends Screen {
 
     private void renderChoice(GuiGraphics g, int mx, int my) {
         int cx = width / 2, cy = Math.max(24, (height - 76) / 2 - 38);
+        ItemStack hoveredIngredient = ItemStack.EMPTY;
         var candidate = selectedCandidate();
         if (candidate == null) {
-            g.drawCenteredString(font, draft == null ? text("waiting") : text("none"), cx, cy + 20, 0xFF404040);
+            drawChoiceLabel(g, draft == null ? text("waiting") : text("none"), cx, cy + 20);
             return;
         }
-        g.drawCenteredString(font, candidate.output().getHoverName(), cx, cy - 4, 0xFF404040);
+        drawChoiceLabel(g, candidate.output().getHoverName(), cx, cy - 4);
         var holder = minecraft.level.getRecipeManager().byKey(candidate.recipe()).orElse(null);
         // Client-synchronized recipes are display data only. Choosing a card
         // still sends a recipe ID for an authoritative full-chain preview.
@@ -545,21 +548,28 @@ public final class CraftingPlanOverlay extends Screen {
                 if (options.length == 0) continue;
                 var stack = options[(int) (frame % options.length)];
                 g.renderItem(stack, x + 1, y + 1);
-                if (mx >= x && mx < x + 18 && my >= y && my < y + 18) g.renderTooltip(font, stack, mx, my);
+                if (mx >= x && mx < x + 18 && my >= y && my < y + 18) hoveredIngredient = stack;
             }
         }
         g.blit(ResourceLocation.withDefaultNamespace("textures/gui/container/crafting_table.png"), cx - 6, cy + 33, 89, 35, 24, 17);
         g.blit(ResourceLocation.withDefaultNamespace("textures/gui/container/inventory.png"), cx + 32, cy + 34, 153, 27, 18, 18);
         g.renderItem(candidate.output(), cx + 33, cy + 35);
         g.renderItemDecorations(font, candidate.output(), cx + 33, cy + 35);
-        g.drawCenteredString(font, Component.literal((choicePage + 1) + " / " + draft.choices().candidates().size()
-                + (draft.choices().truncated() ? " +" : "")), cx, cy + 70, 0xFF404040);
+        drawChoiceLabel(g, Component.literal((choicePage + 1) + " / " + draft.choices().candidates().size()
+                + (draft.choices().truncated() ? " +" : "")), cx, cy + 70);
         var state = candidateStates.get(candidate.recipe());
         String marker = state == null || state == CraftingResultCode.SEARCH_BUDGET_EXCEEDED ? "?"
                 : state == CraftingResultCode.CREATED ? "+" : state == CraftingResultCode.PARTIAL_CREATED ? "!" : "×";
         g.drawString(font, marker, cx + 57, cy + 39, state == CraftingResultCode.CREATED ? 0xFF208020 : 0xFF803030, false);
+        // Draw tooltips only after every slot/item. Later texture blits otherwise
+        // cover parts of the tooltip even though it was requested for an earlier slot.
+        if (!hoveredIngredient.isEmpty()) g.renderTooltip(font, hoveredIngredient, mx, my);
         if (mx >= cx + 30 && mx < cx + 76 && my >= cy + 30 && my < cy + 60)
             g.renderComponentTooltip(font, List.of(candidateLabel(candidate), candidateDescription(candidate)), mx, my);
+    }
+
+    private void drawChoiceLabel(GuiGraphics g, Component label, int centerX, int y) {
+        g.drawString(font, label, centerX - font.width(label) / 2, y, 0xFF404040, false);
     }
 
     @Override public boolean mouseScrolled(double x, double y, double dx, double dy) {

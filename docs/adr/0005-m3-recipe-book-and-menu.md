@@ -21,6 +21,8 @@
 
 2026-09-07 视觉修订：合成网格维度不决定结果槽高亮尺寸。临时背包使用 16×16 结果内容区，既有 RecipeBookComponent Mixin 仅为 AmbientInventoryMenu 将原版 renderGhostRecipe 的大结果标记设为 false；实体工作台仍使用原版 24×24 外扩高亮。不复制 GhostRecipe/CraftingScreen 渲染，不改槽位、事务或协议。
 
+2026-09-28 效果显示修订：上文屏幕继承方案调整为 `EffectRenderingInventoryScreen<CraftingMenu>`，仍复用同一个原版 `RecipeBookComponent`，只在屏幕衔接配方书的布局、输入和更新回调。原因是 `CraftingScreen` 不提供原版背包的药水效果侧栏，也不满足原版 HUD 避免重复显示的类型判据。宽/窄效果布局、提示及 NeoForge 效果事件全部继承原版，不复制渲染器、不新增 HUD Mixin；菜单、槽位和生命周期决策保持不变。
+
 M2 执行器仅扩展合法上下文为原版 CraftingMenu 家族；环境和事务仍独立复验。批次预览不暴露计划/库存，不允许客户端指定数量或成本。M3 不提供递归、撤销、炉类或最大数量批量执行。
 
 ## 索引与刷新回归

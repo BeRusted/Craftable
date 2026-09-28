@@ -27,6 +27,56 @@ public record CraftPlan(ResourceLocation target, int requestedBatches, int compl
     }
 
     public boolean partial() { return completedBatches < requestedBatches; }
+
+    /** Untrusted route only: no output, count of manufactured items, world
+     * coordinates or container write instruction crosses this boundary. */
+    public record Witness(java.util.UUID session, long recipes, long resources, List<WitnessStep> steps) {
+        public Witness {
+            java.util.Objects.requireNonNull(session);
+            if (recipes < 0 || resources < 0 || steps.isEmpty() || steps.size() > SearchBudget.MAX_STEPS)
+                throw new IllegalArgumentException("Invalid witness size/version");
+            steps = List.copyOf(steps);
+            for (int i = 0; i < steps.size(); i++) for (int origin : steps.get(i).origins())
+                if (origin < -1 || origin >= i) throw new IllegalArgumentException("Non-topological witness");
+        }
+
+        public static Witness from(CraftPlan plan, org.berusted.craftable.environment.BrowsingSnapshot snapshot) {
+            if (plan.partial()) throw new IllegalArgumentException("Partial witness");
+            var ledger = new ResourceLedger(snapshot.sources());
+            var steps = new java.util.ArrayList<WitnessStep>();
+            for (var step : plan.steps()) {
+                var refs = new java.util.ArrayList<java.util.UUID>();
+                var inputs = step.inputs();
+                for (int slot = 0; slot < inputs.size(); slot++) {
+                    String ref = inputs.get(slot).isEmpty() ? null
+                            : ledger.consume(inputs.get(slot), step.inputOrigins().get(slot), null).reference();
+                    refs.add(ref == null ? new java.util.UUID(0, 0) : java.util.UUID.fromString(ref));
+                }
+                int origin = steps.size();
+                ledger.produce(step.output(), step.path().equals("0"), false, step.path(), origin);
+                for (var remainder : step.remainders()) ledger.produce(remainder, false, true, step.path(), origin);
+                steps.add(new WitnessStep(step.recipe().id(), step.path(), inputs, step.inputOrigins(), refs));
+            }
+            return new Witness(snapshot.session(), snapshot.recipes(), snapshot.resources(), steps);
+        }
+    }
+
+    public record WitnessStep(ResourceLocation recipe, String path, List<ItemStack> inputs,
+            List<Integer> origins, List<java.util.UUID> references) {
+        public WitnessStep {
+            if (!path.matches("0(?:\\.[0-8]){0,12}") || (inputs.size() != 4 && inputs.size() != 9)
+                    || origins.size() != inputs.size() || references.size() != inputs.size())
+                throw new IllegalArgumentException("Invalid witness grid");
+            inputs = copies(inputs); origins = List.copyOf(origins); references = List.copyOf(references);
+            for (int i = 0; i < inputs.size(); i++) {
+                boolean noRef = references.get(i).equals(new java.util.UUID(0, 0));
+                if (inputs.get(i).isEmpty() ? origins.get(i) != -1 || !noRef
+                        : inputs.get(i).getCount() != 1 || (origins.get(i) >= 0) != noRef)
+                    throw new IllegalArgumentException("Invalid witness binding");
+            }
+        }
+        @Override public List<ItemStack> inputs() { return copies(inputs); }
+    }
     /** Exact value identity, not a collision-prone hash or retained executable plan. */
     public Object fingerprint() {
         return List.of(target, requestedBatches, completedBatches,

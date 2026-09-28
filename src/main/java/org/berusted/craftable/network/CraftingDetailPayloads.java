@@ -78,7 +78,11 @@ public final class CraftingDetailPayloads {
         @Override public Type<BrowseChunk> type() { return TYPE; }
     }
 
-    public record PreviewRequest(int menuId, long revision, CraftRequest request, String choicePath) implements CustomPacketPayload {
+    public record PreviewRequest(int menuId, long revision, CraftRequest request, String choicePath,
+            org.berusted.craftable.planner.CraftPlan.Witness witness) implements CustomPacketPayload {
+        public PreviewRequest(int menuId, long revision, CraftRequest request, String choicePath) {
+            this(menuId, revision, request, choicePath, null);
+        }
         public PreviewRequest {
             identity(menuId, revision);
             if (!choicePath.isEmpty() && !choicePath.matches("0(?:\\.[0-8]){0,12}"))
@@ -86,8 +90,8 @@ public final class CraftingDetailPayloads {
         }
         public static final Type<PreviewRequest> TYPE = new Type<>(Craftable.id("plan_preview"));
         public static final StreamCodec<RegistryFriendlyByteBuf, PreviewRequest> CODEC = CustomPacketPayload.codec(
-                (p, b) -> { b.writeVarInt(p.menuId); b.writeVarLong(p.revision); CraftingWire.request(b, p.request); b.writeUtf(p.choicePath, 32); },
-                b -> new PreviewRequest(b.readVarInt(), b.readVarLong(), CraftingWire.request(b), b.readUtf(32)));
+                (p, outer) -> CraftingWire.writeFrame(outer, b -> { b.writeVarInt(p.menuId); b.writeVarLong(p.revision); CraftingWire.request(b, p.request); b.writeUtf(p.choicePath, 32); CraftingWire.witness(b, p.witness); }),
+                outer -> CraftingWire.readFrame(outer, b -> new PreviewRequest(b.readVarInt(), b.readVarLong(), CraftingWire.request(b), b.readUtf(32), CraftingWire.witness(b))));
         @Override public Type<PreviewRequest> type() { return TYPE; }
     }
 
@@ -149,17 +153,29 @@ public final class CraftingDetailPayloads {
         @Override public Type<MaximumResponse> type() { return TYPE; }
     }
 
-    public record ConfirmRequest(int menuId, long revision, ResourceLocation recipe, UUID token) implements CustomPacketPayload {
+    public record ConfirmRequest(int menuId, long revision, ResourceLocation recipe, UUID token,
+            org.berusted.craftable.planner.CraftPlan.Witness witness) implements CustomPacketPayload {
+        public ConfirmRequest(int menuId, long revision, ResourceLocation recipe, UUID token) {
+            this(menuId, revision, recipe, token, null);
+        }
         public ConfirmRequest { identity(menuId, revision); }
         public static final Type<ConfirmRequest> TYPE = new Type<>(Craftable.id("plan_confirm"));
         public static final StreamCodec<RegistryFriendlyByteBuf, ConfirmRequest> CODEC = CustomPacketPayload.codec(
-                (p, b) -> { b.writeVarInt(p.menuId); b.writeVarLong(p.revision); b.writeResourceLocation(p.recipe); b.writeUUID(p.token); },
-                b -> new ConfirmRequest(b.readVarInt(), b.readVarLong(), b.readResourceLocation(), b.readUUID()));
+                (p, outer) -> CraftingWire.writeFrame(outer, b -> { b.writeVarInt(p.menuId); b.writeVarLong(p.revision); b.writeUtf(p.recipe.toString(),512); b.writeUUID(p.token); CraftingWire.witness(b, p.witness); }),
+                outer -> CraftingWire.readFrame(outer, b -> new ConfirmRequest(b.readVarInt(), b.readVarLong(), ResourceLocation.parse(b.readUtf(512)), b.readUUID(), CraftingWire.witness(b))));
         @Override public Type<ConfirmRequest> type() { return TYPE; }
     }
 
     static CraftingService.Draft failed(CraftingResultCode code) {
         return new CraftingService.Draft(NO_TOKEN, PlanView.failed(code), new PlanView.Choices(List.of(), false));
+    }
+
+    public static boolean fitsWitness(CraftRequest request, org.berusted.craftable.planner.CraftPlan.Witness witness,
+            net.minecraft.core.RegistryAccess registries) {
+        var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(1024, CraftingWire.MAX_DETAIL_BYTES), registries);
+        try { PreviewRequest.CODEC.encode(buffer, new PreviewRequest(100, Long.MAX_VALUE, request, "", witness)); return true; }
+        catch (RuntimeException oversized) { return false; }
+        finally { buffer.release(); }
     }
 
     /** Local displays have the same byte bound as server drafts, but no token. */

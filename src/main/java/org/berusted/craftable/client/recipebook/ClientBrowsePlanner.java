@@ -231,6 +231,20 @@ public final class ClientBrowsePlanner {
     }
 
     public static long scopeVersion() { return scopeVersion; }
+
+    /** Export only the already retained, matching complete detail plan. A
+     * missing/partial plan uses the existing explicit server path, not another
+     * local search or a second plan cache. */
+    public static org.berusted.craftable.planner.CraftPlan.Witness witness(CraftRequest request) {
+        if (!ready() || request.partial() || retainedRequest == null || retainedResult == null
+                || !effective(request).withPartial(false).equals(retainedRequest.withPartial(false))) return null;
+        try {
+            var witness = retainedResult.plan().filter(plan -> !plan.partial())
+                    .map(plan -> org.berusted.craftable.planner.CraftPlan.Witness.from(plan, snapshot)).orElse(null);
+            return witness != null && CraftingDetailPayloads.fitsWitness(request, witness, Minecraft.getInstance().level.registryAccess())
+                    ? witness : null;
+        } catch (IllegalArgumentException unsupported) { return null; }
+    }
     public static boolean ready() {
         var mc = Minecraft.getInstance();
         return input != null && closure != null && snapshot != null && grant != null && mc.level != null

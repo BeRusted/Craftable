@@ -33,8 +33,13 @@ public final class CraftingSessions {
             if (player.getServer().isSameThread()) closeBrowsing(player);
             throw new IllegalStateException("Invalid browsing context");
         }
-        State owner = state(player);
         var world = org.berusted.craftable.environment.EnvironmentSnapshotService.fresh(player);
+        return refreshBrowsing(player, world);
+    }
+
+    static org.berusted.craftable.environment.BrowsingSnapshot refreshBrowsing(ServerPlayer player,
+            org.berusted.craftable.environment.EnvironmentSnapshot world) {
+        State owner = state(player);
         boolean workbench = world.supports(org.berusted.craftable.workstation.WorkstationCapability.CRAFTING_3X3)
                 || player.containerMenu instanceof net.minecraft.world.inventory.CraftingMenu;
         var recipes = new org.berusted.craftable.recipe.CraftingRecipes(player, workbench);
@@ -56,10 +61,57 @@ public final class CraftingSessions {
 
     public static void closeBrowsing(ServerPlayer player) { state(player).browsing = null; }
 
+    /** Cheap rejection before fresh world capture; a stale grant cannot renew
+     * itself by submitting a witness. A successful preflight is not authority. */
+    static boolean acceptsWitness(ServerPlayer player, CraftPlan.Witness witness) {
+        var browsing = state(player).browsing;
+        return browsing != null && browsing.snapshot != null
+                && browsing.validUntil >= player.level().getGameTime()
+                && browsing.session.equals(witness.session())
+                && browsing.snapshot.recipes() == witness.recipes()
+                && browsing.snapshot.resources() == witness.resources();
+    }
+
+    static Map<String, org.berusted.craftable.planner.ResourceLedger.Source> witnessBindings(ServerPlayer player,
+            org.berusted.craftable.environment.EnvironmentSnapshot world) {
+        var result = new HashMap<String, org.berusted.craftable.planner.ResourceLedger.Source>();
+        var browsing = state(player).browsing;
+        for (var endpoint : world.endpoints()) {
+            var binding = browsing.endpoints.get(endpoint.id());
+            for (var reference : binding.references.entrySet()) {
+                var stack = endpoint.container().getItem(reference.getKey());
+                if (!stack.isEmpty() && !org.berusted.craftable.recipe.CraftingRecipes.protectedStack(stack))
+                    result.put(reference.getValue().toString(), new org.berusted.craftable.planner.ResourceLedger.Source(
+                            endpoint.id(), reference.getKey(), stack));
+            }
+        }
+        return result;
+    }
+
     static long browsingLease(ServerPlayer player) {
         var browsing = state(player).browsing;
         return browsing == null ? Long.MIN_VALUE : browsing.validUntil;
     }
+
+    static FailureEvidence failure(ServerPlayer player, Object identity) {
+        var state = state(player);
+        var evidence = state.failure;
+        long now = player.level().getGameTime();
+        if (evidence != null && (!evidence.identity.equals(identity) || now < evidence.tick || now - evidence.tick > 40))
+            state.failure = null;
+        return state.failure;
+    }
+
+    static void rememberFailure(ServerPlayer player, Object identity,
+            org.berusted.craftable.planner.CraftSearch.Reachability scope,
+            org.berusted.craftable.planner.CraftSearch.FullEvidence evidence) {
+        state(player).failure = evidence == null ? null
+                : new FailureEvidence(identity, player.level().getGameTime(), scope, evidence);
+    }
+
+    record FailureEvidence(Object identity, long tick,
+            org.berusted.craftable.planner.CraftSearch.Reachability scope,
+            org.berusted.craftable.planner.CraftSearch.FullEvidence evidence) {}
 
     /** Only weak identity references survive a scan. They cannot be used for
      * extraction and do not keep chunks/containers alive. Fresh scanning is
@@ -166,6 +218,7 @@ public final class CraftingSessions {
                     || state.confirmation.expires < now || !CraftingService.validContext(player))) state.confirmation = null;
             if (state.last != null && (state.last.menu != player.containerMenu || now - state.last.tick > 40)) state.last = null;
             if (!CraftingService.validContext(player)) {
+                state.failure = null;
                 state.maximum = null;
                 state.preview = null;
                 state.browsing = null;
@@ -176,6 +229,7 @@ public final class CraftingSessions {
             // A folded/closed book has no explicit close packet in protocol 6.
             // Release the migration cache after bounded inactivity, not forever.
             if (state.preview != null && (now < state.preview.lastUsed || now - state.preview.lastUsed > 200)) state.preview = null;
+            if (state.failure != null && (now < state.failure.tick || now - state.failure.tick > 40)) state.failure = null;
             return false;
         });
     }
@@ -208,6 +262,10 @@ public final class CraftingSessions {
     }
 
     static UUID offer(ServerPlayer player, CraftingService.Prepared prepared) {
+        return offer(player, prepared, false);
+    }
+
+    static UUID offer(ServerPlayer player, CraftingService.Prepared prepared, boolean witness) {
         State state = state(player);
         state.confirmation = null;
         var plan = prepared.result().plan().orElse(null);
@@ -215,7 +273,7 @@ public final class CraftingSessions {
         UUID token = UUID.randomUUID();
         state.confirmation = new Confirmation(token, player.containerMenu, player.level().dimension(),
                 player.level().getGameTime() + 200, prepared.request(), prepared.rules(),
-                prepared.recipes().generation(), fingerprint(plan, prepared.delivery().drops()));
+                prepared.recipes().generation(), fingerprint(plan, prepared.delivery().drops()), witness);
         return token;
     }
 
@@ -288,12 +346,13 @@ public final class CraftingSessions {
             state.maximum = null;
             state.preview = null;
             state.browsing = null;
+            state.failure = null;
         }
         return state;
     }
 
     record Confirmation(UUID token, AbstractContainerMenu menu, Object dimension, long expires,
-            CraftRequest request, CraftableServerConfig.CraftingRules rules, Object recipeGeneration, Object fingerprint) {
+            CraftRequest request, CraftableServerConfig.CraftingRules rules, Object recipeGeneration, Object fingerprint, boolean witness) {
         boolean matches(CraftingService.Prepared fresh) {
             return request.equals(fresh.request()) && rules.equals(fresh.rules())
                     && recipeGeneration == fresh.recipes().generation()
@@ -311,6 +370,7 @@ public final class CraftingSessions {
         MaximumProgress maximum;
         PreviewState preview;
         BrowsingState browsing;
+        FailureEvidence failure;
         // An idle player must not pin a discarded recipe generation after reload.
         java.lang.ref.WeakReference<Object> recipeIdentity = new java.lang.ref.WeakReference<>(null);
         long recipeVersion;

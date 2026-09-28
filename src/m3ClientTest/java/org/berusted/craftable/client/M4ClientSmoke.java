@@ -57,6 +57,7 @@ public final class M4ClientSmoke {
     private static final java.util.List<Double> filterCpu = new java.util.ArrayList<>();
     private static int browseBuilds;
     private static long serverDetails, serverMaximums;
+    private static long witnessBefore, fullSearchesBefore;
     private static int reviewMismatchPhase;
     private static final java.util.List<Long> timings = new java.util.ArrayList<>();
     private static final BlockPos CHEST = new BlockPos(1, -60, 1);
@@ -246,6 +247,14 @@ public final class M4ClientSmoke {
                 click(widget.getX() + (int) field(cell, "x") + (int) field(graph, "panX") + 8,
                         widget.getY() + (int) field(cell, "y") + (int) field(graph, "panY") + 8);
                 next();
+            } else if (stage == 5 && age == 30) {
+                // Hover the first ingredient for several rendered frames before
+                // capturing: this reproduces later-slot blits covering its tooltip.
+                int cx = mc.screen.width / 2, cy = Math.max(24, (mc.screen.height - 76) / 2 - 38);
+                var window = mc.getWindow();
+                org.lwjgl.glfw.GLFW.glfwSetCursorPos(window.getWindow(),
+                        (cx - 62.0) * window.getScreenWidth() / mc.screen.width,
+                        (cy + 25.0) * window.getScreenHeight() / mc.screen.height);
             } else if (stage == 5 && age > 60 && field(overlay(), "pending") == null) {
                 require(field(overlay(), "pane").toString().equals("CHOICES"), "Node click missed chooser");
                 var states = (java.util.Map<?, ?>) field(overlay(), "candidateStates");
@@ -276,6 +285,8 @@ public final class M4ClientSmoke {
                 var create = (Button) field(overlay(), "create");
                 require(create.active, "Full confirm disabled");
                 if (reviewMismatchPhase == 0) {
+                    witnessBefore = executionCounter("witnessValidations");
+                    fullSearchesBefore = executionCounter("activeFullSearches");
                     // Simulate a stale/mismatching client review, not changed
                     // server inventory. The first click may obtain authority
                     // but must not silently accept different material costs.
@@ -296,6 +307,9 @@ public final class M4ClientSmoke {
                 click(create.getX() + 5, create.getY() + 5);
                 next();
             } else if (stage == 8 && age > 30 && ready()) {
+                require(executionCounter("witnessValidations") >= witnessBefore + 2, "Full detail did not validate witness twice");
+                require(executionCounter("activeFullSearches") == fullSearchesBefore, "Full detail re-searched on server");
+                Craftable.LOGGER.warn("M49_CLIENT full detail review+confirm witnessValidations=2 fullSearches=0");
                 require(mc.player.getInventory().countItem(Items.DIAMOND_PICKAXE) == 1, "Confirm did not deliver pickaxe");
                 require(mc.player.getInventory().countItem(Items.STICK) == 2, "Wrong stick surplus");
                 require(mc.player.getInventory().countItem(Items.OAK_PLANKS) == 2, "Wrong plank surplus");
@@ -518,6 +532,10 @@ public final class M4ClientSmoke {
     private static void shot(String name) {
         var mc = Minecraft.getInstance();
         Screenshot.grab(mc.gameDirectory, "m4-smoke-" + name + ".png", mc.getMainRenderTarget(), ignored -> {});
+    }
+    private static long executionCounter(String name) throws Exception {
+        var field = CraftingService.class.getDeclaredField(name); field.setAccessible(true);
+        return field.getLong(null);
     }
     private static void next() { stage++; age = 0; Craftable.LOGGER.warn("M4_SMOKE stage {}", stage); }
     private static void require(boolean ok, String message) { if (!ok) throw new AssertionError(message); }

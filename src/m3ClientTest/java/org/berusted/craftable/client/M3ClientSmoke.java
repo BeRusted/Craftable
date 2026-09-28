@@ -42,6 +42,8 @@ public final class M3ClientSmoke {
     private static volatile boolean configured;
     private static long quietSequence;
     private static long previewStart;
+    private static boolean wideEffectsRendered, compactEffectsRendered;
+    private static int savedScale = -1;
     private static final java.util.List<Long> previewSamples = new java.util.ArrayList<>();
     private static final BlockPos TABLE = new BlockPos(2, -60, 0);
     private static final BlockPos CHEST = new BlockPos(1, -60, 1);
@@ -77,6 +79,8 @@ public final class M3ClientSmoke {
                     level.setBlockAndUpdate(CHEST.above(), Blocks.AIR.defaultBlockState());
                     ((ChestBlockEntity) level.getBlockEntity(CHEST)).setItem(0, new ItemStack(Items.OAK_PLANKS, 16));
                     player.getInventory().clearContent();
+                    player.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.NIGHT_VISION, 24000));
+                    player.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.MOVEMENT_SPEED, 24000));
                     configured = true;
                 });
                 advance();
@@ -158,8 +162,7 @@ public final class M3ClientSmoke {
                     player.openMenu(Blocks.CRAFTING_TABLE.defaultBlockState().getMenuProvider(level, TABLE));
                 });
                 advance();
-            } else if (stage == 10 && mc.screen instanceof net.minecraft.client.gui.screens.inventory.CraftingScreen screen
-                    && !(screen instanceof AmbientInventoryScreen)) {
+            } else if (stage == 10 && mc.screen instanceof net.minecraft.client.gui.screens.inventory.CraftingScreen screen) {
                 searchSticks(screen.getRecipeBookComponent());
                 showSwordGhost(screen.getRecipeBookComponent());
                 advance();
@@ -255,15 +258,44 @@ public final class M3ClientSmoke {
                     advance();
                 }
             } else if (stage == 24) {
-                Craftable.LOGGER.warn("M3_SMOKE PASS: inventory layout and sword ghost, chest preview/filter/create, 200 ticks tab/index stress, physical workbench ghost, repeated creative E without requests, mode-switch returns, spectator isolation, explicit survival/adventure reopen");
+                savedScale = mc.options.guiScale().get();
+                mc.getWindow().setWindowed(1280, 960);
+                mc.options.guiScale().set(2); mc.resizeDisplay();
+                wideEffectsRendered = false;
+                advance();
+            } else if (stage == 25 && age > 30) {
+                require(((AmbientInventoryScreen) mc.screen).canSeeEffects() && wideEffectsRendered,
+                        "Vanilla wide effect renderer/HUD suppression not reached");
+                Screenshot.grab(mc.gameDirectory, "m3-smoke-effects-wide.png", mc.getMainRenderTarget(), ignored -> {});
+                mc.options.guiScale().set(3); mc.resizeDisplay();
+                compactEffectsRendered = false;
+                advance();
+            } else if (stage == 26 && age > 30) {
+                require(((AmbientInventoryScreen) mc.screen).canSeeEffects() && compactEffectsRendered,
+                        "Vanilla compact effect renderer/HUD suppression not reached");
+                Screenshot.grab(mc.gameDirectory, "m3-smoke-effects-compact.png", mc.getMainRenderTarget(), ignored -> {});
+                mc.player.closeContainer();
+                advance();
+            } else if (stage == 27 && age > 20) {
+                require(mc.screen == null && mc.player.getActiveEffects().size() == 2, "Closing inventory changed active effects");
+                Screenshot.grab(mc.gameDirectory, "m3-smoke-effects-hud.png", mc.getMainRenderTarget(), ignored -> {});
+                mc.options.guiScale().set(savedScale);
+                Craftable.LOGGER.warn("M3_SMOKE PASS: inventory layout and sword ghost, chest preview/filter/create, 200 ticks tab/index stress, physical workbench ghost, repeated creative E without requests, mode-switch returns, spectator isolation, explicit survival/adventure reopen, native wide/compact effects and HUD return");
                 stage = -1;
                 mc.stop();
             }
         } catch (Throwable failure) {
+            if (savedScale >= 0) mc.options.guiScale().set(savedScale);
             Craftable.LOGGER.error("M3_SMOKE FAIL stage " + stage, failure);
             stage = -1;
             mc.stop();
         }
+    }
+    @SubscribeEvent public static void effects(net.neoforged.neoforge.client.event.ScreenEvent.RenderInventoryMobEffects event) {
+        if (!Boolean.getBoolean("craftable.m3Smoke") || !(event.getScreen() instanceof AmbientInventoryScreen)) return;
+        // Observe the real vanilla renderer; don't implement a test-only effect layout.
+        if (event.isCompact()) compactEffectsRendered = true;
+        else wideEffectsRendered = true;
     }
     private static void advance() { stage++; age = 0; Craftable.LOGGER.warn("M3_SMOKE stage {}", stage); }
     private static void showSwordGhost(net.minecraft.client.gui.screens.recipebook.RecipeBookComponent book) {
