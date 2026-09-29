@@ -393,12 +393,13 @@ public final class CraftingPlanOverlay extends Screen {
         }
     }
 
-    public static void receive(CraftingDetailPayloads.MaximumResponse payload) {
+    /** Local MAX completion retains the same menu/revision barrier, without a wire payload. */
+    public static void receiveMaximum(int menuId, long revision, CraftingService.Maximum maximum) {
         var self = current;
-        if (self == null || !self.accepts(payload.menuId(), payload.revision())) return;
-        if (!payload.maximum().pending()) self.pending = null;
+        if (self == null || !self.accepts(menuId, revision)) return;
+        if (!maximum.pending()) self.pending = null;
         if (self.sentGeneration != self.generation) return;
-        self.maximum = payload.maximum();
+        self.maximum = maximum;
         self.slider.syncValue();
         if (self.queuedAction != null) {
             boolean action = self.queuedAction;

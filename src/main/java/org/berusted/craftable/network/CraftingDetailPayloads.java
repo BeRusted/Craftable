@@ -126,33 +126,6 @@ public final class CraftingDetailPayloads {
         @Override public Type<PreviewResponse> type() { return TYPE; }
     }
 
-    public record MaximumRequest(int menuId, long revision, CraftRequest request) implements CustomPacketPayload {
-        public MaximumRequest { identity(menuId, revision); }
-        public static final Type<MaximumRequest> TYPE = new Type<>(Craftable.id("plan_maximum"));
-        public static final StreamCodec<RegistryFriendlyByteBuf, MaximumRequest> CODEC = CustomPacketPayload.codec(
-                (p, b) -> { b.writeVarInt(p.menuId); b.writeVarLong(p.revision); CraftingWire.request(b, p.request); },
-                b -> new MaximumRequest(b.readVarInt(), b.readVarLong(), CraftingWire.request(b)));
-        @Override public Type<MaximumRequest> type() { return TYPE; }
-    }
-
-    public record MaximumResponse(int menuId, long revision, CraftingService.Maximum maximum) implements CustomPacketPayload {
-        public MaximumResponse {
-            identity(menuId, revision);
-            if (maximum.lowerBound() < 0 || maximum.cap() < maximum.lowerBound() || maximum.cap() > 64
-                    || maximum.proven() && (maximum.pending() || maximum.limited()))
-                throw new IllegalArgumentException("Invalid maximum result");
-        }
-        public static final Type<MaximumResponse> TYPE = new Type<>(Craftable.id("plan_maximum_result"));
-        public static final StreamCodec<RegistryFriendlyByteBuf, MaximumResponse> CODEC = CustomPacketPayload.codec(
-                (p, b) -> {
-                    b.writeVarInt(p.menuId); b.writeVarLong(p.revision);
-                    b.writeVarInt(p.maximum.lowerBound()); b.writeBoolean(p.maximum.proven()); b.writeVarInt(p.maximum.cap());
-                    b.writeBoolean(p.maximum.limited()); b.writeBoolean(p.maximum.pending());
-                }, b -> new MaximumResponse(b.readVarInt(), b.readVarLong(), new CraftingService.Maximum(
-                        b.readVarInt(), b.readBoolean(), b.readVarInt(), b.readBoolean(), b.readBoolean())));
-        @Override public Type<MaximumResponse> type() { return TYPE; }
-    }
-
     public record ConfirmRequest(int menuId, long revision, ResourceLocation recipe, UUID token,
             org.berusted.craftable.planner.CraftPlan.Witness witness) implements CustomPacketPayload {
         public ConfirmRequest(int menuId, long revision, ResourceLocation recipe, UUID token) {

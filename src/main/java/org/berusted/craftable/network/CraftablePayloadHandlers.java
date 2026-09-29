@@ -11,10 +11,9 @@ public final class CraftablePayloadHandlers {
 
     private static final java.util.LinkedHashMap<java.util.UUID, BrowseTransfer> BROWSERS = new java.util.LinkedHashMap<>();
     private static int browseCursor, transferCursor;
-    private static volatile long detailRequests, maximumRequests;
+    private static volatile long detailRequests;
     /** Acceptance counters: count the real network entries, not just solver calls. */
     public static long detailRequests() { return detailRequests; }
-    public static long maximumRequests() { return maximumRequests; }
 
     public static void handleBrowse(CraftingDetailPayloads.BrowseRequest payload, IPayloadContext context) {
         context.enqueueWork(() -> {
@@ -152,25 +151,6 @@ public final class CraftablePayloadHandlers {
         });
     }
 
-    public static void handlePlanMaximum(CraftingDetailPayloads.MaximumRequest payload, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            if (!(context.player() instanceof ServerPlayer player)) return;
-            maximumRequests++;
-            var result = new CraftingService.Maximum(0, false, 0, true, false);
-            if (player.containerMenu.containerId == payload.menuId() && CraftingService.validContext(player)) {
-                result = new CraftingService.Maximum(0, false, 0, true, true);
-                if (CraftableRequestLimiter.allowDetail(player.getUUID(), player.level().getGameTime()))
-                    try (var lease = CraftableRequestLimiter.planning(player.getServer(), player.getUUID(), false)) {
-                        if (lease.allowed()) result = CraftingService.maximum(player, payload.request());
-                    } catch (RuntimeException failure) {
-                        org.berusted.craftable.Craftable.LOGGER.error("Maximum preview failed", failure);
-                        result = new CraftingService.Maximum(0, false, 0, true, false);
-                    }
-            }
-            context.reply(new CraftingDetailPayloads.MaximumResponse(payload.menuId(), payload.revision(), result));
-        });
-    }
-
     public static void handlePlanConfirm(CraftingDetailPayloads.ConfirmRequest payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
@@ -195,9 +175,6 @@ public final class CraftablePayloadHandlers {
         context.enqueueWork(() -> ClientPayloadHandler.handle(payload));
     }
 
-    public static void handlePlanMaximumResult(CraftingDetailPayloads.MaximumResponse payload, IPayloadContext context) {
-        context.enqueueWork(() -> ClientPayloadHandler.handle(payload));
-    }
 
     public static void handleOpenInventory(OpenInventoryRequestPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {

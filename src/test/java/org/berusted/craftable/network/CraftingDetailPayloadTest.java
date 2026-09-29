@@ -5,7 +5,6 @@ import java.util.Map;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
-import org.berusted.craftable.execution.CraftingService;
 import org.berusted.craftable.planner.CraftRequest;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -38,7 +37,7 @@ class CraftingDetailPayloadTest {
         } finally { buffer.release(); }
     }
 
-    @Test void selectedIntentAndUnknownMaximumRoundTrip() {
+    @Test void selectedIntentRoundTrip() {
         var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
         try {
             var intent = new CraftRequest(ID, 3, true, false, CraftRequest.PartialPolicy.CONFIRM,
@@ -46,12 +45,6 @@ class CraftingDetailPayloadTest {
             var request = new CraftingDetailPayloads.PreviewRequest(1, 12, intent, "0.4");
             CraftingDetailPayloads.PreviewRequest.CODEC.encode(buffer, request);
             assertEquals(request, CraftingDetailPayloads.PreviewRequest.CODEC.decode(buffer));
-            buffer.clear();
-            var maximum = new CraftingDetailPayloads.MaximumResponse(1, 13,
-                    new CraftingService.Maximum(0, false, 64, true, false));
-            CraftingDetailPayloads.MaximumResponse.CODEC.encode(buffer, maximum);
-            assertEquals(maximum, CraftingDetailPayloads.MaximumResponse.CODEC.decode(buffer));
-            assertFalse(maximum.maximum().proven()); // Unknown is not a proven zero.
         } finally { buffer.release(); }
     }
 

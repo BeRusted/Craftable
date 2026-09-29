@@ -6,7 +6,7 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
  * Owns the protocol version and all Craftable payload registrations.
  */
 public final class CraftablePayloads {
-    public static final String PROTOCOL_VERSION = "8";
+    public static final String PROTOCOL_VERSION = "9";
 
     private CraftablePayloads() {}
 
@@ -22,16 +22,11 @@ public final class CraftablePayloads {
                 CraftablePayloadHandlers::handlePlanPreview);
         registrar.playToClient(CraftingDetailPayloads.PreviewResponse.TYPE, CraftingDetailPayloads.PreviewResponse.CODEC,
                 CraftablePayloadHandlers::handlePlanPreviewResult);
-        registrar.playToServer(CraftingDetailPayloads.MaximumRequest.TYPE, CraftingDetailPayloads.MaximumRequest.CODEC,
-                CraftablePayloadHandlers::handlePlanMaximum);
-        registrar.playToClient(CraftingDetailPayloads.MaximumResponse.TYPE, CraftingDetailPayloads.MaximumResponse.CODEC,
-                CraftablePayloadHandlers::handlePlanMaximumResult);
         registrar.playToServer(CraftingDetailPayloads.ConfirmRequest.TYPE, CraftingDetailPayloads.ConfirmRequest.CODEC,
                 CraftablePayloadHandlers::handlePlanConfirm);
         registrar.playToServer(OpenInventoryRequestPayload.TYPE, OpenInventoryRequestPayload.STREAM_CODEC,
                 CraftablePayloadHandlers::handleOpenInventory);
-        // Protocol 7 has no passive per-target status request. Old codecs may
-        // remain in baseline tests, but cannot silently resurrect bulk polling.
+        // Browsing and MAX are client-local; only explicit actions can request a server plan.
         registrar.playToServer(
                 CreateRecipeRequestPayload.TYPE,
                 CreateRecipeRequestPayload.STREAM_CODEC,

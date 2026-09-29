@@ -299,9 +299,9 @@ public final class ClientBrowsePlanner {
         if (!ClientRecipeStatusStore.canRecord(request)) {
             if (work.maximum) {
                 detail = null;
-                org.berusted.craftable.client.CraftingPlanOverlay.receive(new CraftingDetailPayloads.MaximumResponse(
+                org.berusted.craftable.client.CraftingPlanOverlay.receiveMaximum(
                         menuId, work.sequence, new org.berusted.craftable.execution.CraftingService.Maximum(
-                                0, false, snapshot.maxBatches(), true, false)));
+                                0, false, snapshot.maxBatches(), true, false));
             } else publishPreview(work, SearchResult.blocked(org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED));
             return null; // A full result store is terminal, not an infinite MAX loop.
         }
@@ -360,8 +360,7 @@ public final class ClientBrowsePlanner {
     private static void publishMaximum(DetailWork work) {
         var maximum = maximumView(work.request, snapshot.maxBatches());
         if (!maximum.pending()) detail = null;
-        org.berusted.craftable.client.CraftingPlanOverlay.receive(new CraftingDetailPayloads.MaximumResponse(
-                menuId, work.sequence, maximum));
+        org.berusted.craftable.client.CraftingPlanOverlay.receiveMaximum(menuId, work.sequence, maximum);
     }
 
     static org.berusted.craftable.execution.CraftingService.Maximum maximumView(CraftRequest intent, int cap) {

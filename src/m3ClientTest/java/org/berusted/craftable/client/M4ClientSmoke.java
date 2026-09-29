@@ -49,14 +49,8 @@ public final class M4ClientSmoke {
     private static int oldScale, oldWidth, oldHeight;
     private static String oldLanguage;
     private static long previewStart;
-    private static int browsePhase, browseStarted;
-    private static long browseSearches, browseCompleted;
-    private static long browseStartNanos;
-    private static int rangeReturns;
-    private static final java.util.List<Double> filterTimings = new java.util.ArrayList<>();
-    private static final java.util.List<Double> filterCpu = new java.util.ArrayList<>();
-    private static int browseBuilds;
-    private static long serverDetails, serverMaximums;
+    private static final M4BrowsingScenario browsing = new M4BrowsingScenario();
+    private static long serverDetails;
     private static long witnessBefore, fullSearchesBefore;
     private static int reviewMismatchPhase;
     private static final java.util.List<Long> timings = new java.util.ArrayList<>();
@@ -94,6 +88,26 @@ public final class M4ClientSmoke {
             if (++age > (stage == 3 ? 1400 : 600)) throw new AssertionError("Timeout at stage " + stage + ", pending="
                     + (overlay() == null ? "closed" : field(overlay(), "pending") + ", max=" + field(overlay(), "maximum")
                     + ", dirty=" + field(overlay(), "dirty") + ", draft=" + (draft() == null ? "none" : draft().view().code())));
+            if (stage <= 3) setupAndBrowse(mc);
+            else if (stage <= 19) detailsAndCrafting(mc);
+            else lifecycleAndPresentation(mc);
+        } catch (Throwable error) {
+            Craftable.LOGGER.error("M4_SMOKE FAIL stage " + stage, error);
+            stage = -1;
+            restoreOptions();
+            mc.stop();
+        }
+    }
+
+    private static void stock(boolean diamonds) {
+        var player = serverPlayer();
+        player.getInventory().clearContent();
+        var chest = (ChestBlockEntity) player.serverLevel().getBlockEntity(CHEST);
+        chest.clearContent(); chest.setItem(0, new ItemStack(Items.OAK_LOG));
+        if (diamonds) chest.setItem(1, new ItemStack(Items.DIAMOND, 3));
+        chest.setChanged(); player.containerMenu.broadcastChanges();
+    }
+    private static void setupAndBrowse(Minecraft mc) throws Exception {
             if (stage == 0) {
                 mc.getSingleplayerServer().execute(() -> {
                     var player = serverPlayer();
@@ -120,86 +134,7 @@ public final class M4ClientSmoke {
                 book.recipesUpdated();
                 next();
             } else if (stage == 3 && age > 80) {
-                var liveBook = ((AmbientInventoryScreen) mc.screen).getRecipeBookComponent();
-                var liveSearch = ((RecipeBookComponentAccessor) liveBook).craftable$getSearchBox();
-                if (browsePhase == 0) {
-                    browseSearches = org.berusted.craftable.client.recipebook.ClientBrowsePlanner.searches();
-                    browseBuilds = org.berusted.craftable.client.recipebook.ClientBrowsePlanner.catalogBuilds();
-                    browseStarted = age;
-                    browseStartNanos = System.nanoTime();
-                    mc.player.getRecipeBook().setFiltering(RecipeBookType.CRAFTING, true);
-                    liveSearch.setValue(""); liveBook.recipesUpdated();
-                    org.berusted.craftable.client.recipebook.ClientBrowsePlanner.invalidate();
-                    browsePhase = 5; return;
-                }
-                if (browsePhase == 1) {
-                    filterCpu.add(org.berusted.craftable.client.recipebook.ClientBrowsePlanner.lastTickNanos() / 1e6);
-                    var ids = org.berusted.craftable.client.recipebook.RecipeBookProjection.scope(liveBook).stream()
-                            .flatMap(c -> org.berusted.craftable.client.recipebook.RecipeBookProjection.candidates(c).stream())
-                            .map(r -> r.id()).distinct().toList();
-                    long completed = ids.stream().filter(org.berusted.craftable.client.recipebook.ClientRecipeStatusStore::computed).count();
-                    if (completed != ids.size() && age - browseStarted < 400) return;
-                    require(completed == ids.size(), "Local hidden filtering did not finish within 400 ticks: " + completed + "/" + ids.size());
-                    long unknown = ids.stream().filter(id -> org.berusted.craftable.client.recipebook.ClientRecipeStatusStore.reason(id)
-                            == CraftingResultCode.SEARCH_BUDGET_EXCEEDED).count();
-                    var cpu = filterCpu.stream().sorted().toList();
-                    Craftable.LOGGER.warn("M48_LIVE_FILTER targets={} ticks={} quantityTasks={} unknown={} catalogBuilds={} cpuP95Ms={} cpuMaxMs={}",
-                            ids.size(), age - browseStarted, org.berusted.craftable.client.recipebook.ClientBrowsePlanner.searches() - browseSearches,
-                            unknown, org.berusted.craftable.client.recipebook.ClientBrowsePlanner.catalogBuilds(),
-                            cpu.get((int) Math.ceil(cpu.size() * .95) - 1), cpu.getLast());
-                    filterCpu.clear();
-                    filterTimings.add((System.nanoTime() - browseStartNanos) / 1e6);
-                    require(unknown == 0, "Stopped unknown work is not filter convergence");
-                    if (filterTimings.size() < 5) {
-                        // A fresh dynamic session must capture/transfer/bind again,
-                        // but the connection's static catalog must survive.
-                        org.berusted.craftable.client.recipebook.ClientBrowsePlanner.invalidate();
-                        browseStarted = age; browseStartNanos = System.nanoTime();
-                        browseSearches = org.berusted.craftable.client.recipebook.ClientBrowsePlanner.searches();
-                        browsePhase = 5;
-                        return;
-                    }
-                    var sorted = filterTimings.stream().sorted().toList();
-                    Craftable.LOGGER.warn("M48_FILTER_SESSIONS samples=5 ms={} P50={} P95={} max={} catalogBuilds={}",
-                            filterTimings, sorted.get(2), sorted.get(4), sorted.get(4),
-                            org.berusted.craftable.client.recipebook.ClientBrowsePlanner.catalogBuilds());
-                    browseCompleted = org.berusted.craftable.client.recipebook.ClientBrowsePlanner.searches();
-                    browseStarted = age; browsePhase = 2;
-                    liveSearch.setValue(Items.DIAMOND_PICKAXE.getDescription().getString()); liveBook.recipesUpdated(); return;
-                }
-                if (browsePhase == 5) {
-                    // invalidate() hides authority immediately; wait for the new
-                    // snapshot so old conclusions cannot finish a cold sample.
-                    if (!org.berusted.craftable.client.recipebook.ClientBrowsePlanner.ready()) return;
-                    browsePhase = 1; return;
-                }
-                if (browsePhase == 2) {
-                    if (age - browseStarted < 1) return;
-                    liveSearch.setValue(""); liveBook.recipesUpdated(); browseStarted = age; browsePhase = 3; return;
-                }
-                if (browsePhase == 3) {
-                    if (age - browseStarted < 1) return;
-                    require(org.berusted.craftable.client.recipebook.ClientBrowsePlanner.searches() == browseCompleted,
-                            "Same-version category/search return restarted searches");
-                    require(org.berusted.craftable.client.recipebook.ClientBrowsePlanner.catalogBuilds() == browseBuilds,
-                            "Category/search changed static catalog generation");
-                    if (++rangeReturns < 100) {
-                        liveSearch.setValue(Items.DIAMOND_PICKAXE.getDescription().getString()); liveBook.recipesUpdated();
-                        browseStarted = age; browsePhase = 2; return;
-                    }
-                    Craftable.LOGGER.warn("M48_LIVE_REUSE completeRangeReturns=100 newSearches=0 unchangedLease=0Rebuilds");
-                    var ids = org.berusted.craftable.client.recipebook.RecipeBookProjection.scope(liveBook).stream()
-                            .flatMap(c -> org.berusted.craftable.client.recipebook.RecipeBookProjection.candidates(c).stream())
-                            .map(r -> r.id()).distinct().toList();
-                    M48SchedulingProbe.start(ids); browsePhase = 6; return;
-                }
-                if (browsePhase == 6) {
-                    if (!M48SchedulingProbe.complete()
-                            || !org.berusted.craftable.client.recipebook.ClientBrowsePlanner.ready()
-                            || !org.berusted.craftable.client.recipebook.ClientRecipeStatusStore.computed(PICK)) return;
-                    liveSearch.setValue(Items.DIAMOND_PICKAXE.getDescription().getString()); liveBook.recipesUpdated();
-                    browsePhase = 4;
-                }
+                if (!browsing.tick(mc, age, PICK)) return;
                 require(org.berusted.craftable.client.recipebook.ClientRecipeStatusStore.lifecycle(PICK)
                         == org.berusted.craftable.client.recipebook.ClientRecipeStatusStore.Lifecycle.KNOWN,
                         "Production local snapshot never became authorized");
@@ -216,12 +151,15 @@ public final class M4ClientSmoke {
                 hover.setAccessible(true); hover.set(page, button);
                 menu = mc.player.containerMenu;
                 serverDetails = org.berusted.craftable.network.CraftablePayloadHandlers.detailRequests();
-                serverMaximums = org.berusted.craftable.network.CraftablePayloadHandlers.maximumRequests();
                 key(67, org.lwjgl.glfw.GLFW.GLFW_MOD_SHIFT);
                 require(CraftingPlanOverlay.active(), "Shift+C did not open embedded detail");
                 require(mc.player.containerMenu == menu, "Detail replaced parent menu");
                 next();
-            } else if (stage == 4 && ready()) {
+            }
+    }
+
+    private static void detailsAndCrafting(Minecraft mc) throws Exception {
+            if (stage == 4 && ready()) {
                 var draft = draft();
                 require(draft.view().code() == CraftingResultCode.CREATED, "Full preview not craftable: " + draft.view().code());
                 require(draft.view().operations().size() == 3, "Preview lost recursive steps");
@@ -269,8 +207,7 @@ public final class M4ClientSmoke {
                 click(apply.getX() + 5, apply.getY() + 5);
                 next();
             } else if (stage == 6 && ready()) {
-                require(org.berusted.craftable.network.CraftablePayloadHandlers.detailRequests() == serverDetails
-                        && org.berusted.craftable.network.CraftablePayloadHandlers.maximumRequests() == serverMaximums,
+                require(org.berusted.craftable.network.CraftablePayloadHandlers.detailRequests() == serverDetails,
                         "Passive details/candidates/MAX still searched on server");
                 Craftable.LOGGER.warn("M48_LOCAL_DETAILS previews/candidates/MAX serverRequests=0");
                 require(draft().view().code() != CraftingResultCode.CREATED, "Unavailable pin silently ignored");
@@ -400,7 +337,11 @@ public final class M4ClientSmoke {
                 require(mc.player.getInventory().countItem(Items.DIAMOND_PICKAXE) == 0, "Canceled queued click still crafted");
                 mc.options.guiScale().set(1); mc.resizeDisplay();
                 next();
-            } else if (stage == 20 && age > 15 && ready()) {
+            }
+    }
+
+    private static void lifecycleAndPresentation(Minecraft mc) throws Exception {
+            if (stage == 20 && age > 15 && ready()) {
                 shot("scale-1");
                 mc.getWindow().setWindowed(1280, 960);
                 mc.options.guiScale().set(3); mc.resizeDisplay();
@@ -465,22 +406,8 @@ public final class M4ClientSmoke {
                 restoreOptions();
                 mc.stop();
             }
-        } catch (Throwable error) {
-            Craftable.LOGGER.error("M4_SMOKE FAIL stage " + stage, error);
-            stage = -1;
-            restoreOptions();
-            mc.stop();
-        }
     }
 
-    private static void stock(boolean diamonds) {
-        var player = serverPlayer();
-        player.getInventory().clearContent();
-        var chest = (ChestBlockEntity) player.serverLevel().getBlockEntity(CHEST);
-        chest.clearContent(); chest.setItem(0, new ItemStack(Items.OAK_LOG));
-        if (diamonds) chest.setItem(1, new ItemStack(Items.DIAMOND, 3));
-        chest.setChanged(); player.containerMenu.broadcastChanges();
-    }
     private static void restoreOptions() {
         if (!started) return;
         var mc = Minecraft.getInstance();

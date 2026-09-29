@@ -23,9 +23,6 @@ final class ClientPayloadHandler {
         org.berusted.craftable.client.CraftingPlanOverlay.receive(payload);
     }
 
-    static void handle(CraftingDetailPayloads.MaximumResponse payload) {
-        org.berusted.craftable.client.CraftingPlanOverlay.receive(payload);
-    }
 
     static void handle(CreateRecipeResultPayload payload) {
         if (payload.requestId() <= lastCreateResponseRequestId) return;
