@@ -43,6 +43,7 @@
 | `src/m3ClientTest/java/.../client/M3ClientSmoke.java` | inventory 唯一入口；历史源集名保留，非 M3 专属测试框架 |
 | `client/M4ClientSmoke.java` | planning 唯一入口：准备/浏览、详情/合成、生命周期/展示三个阶段方法 |
 | `client/M4BrowsingScenario.java`、`M48SchedulingProbe.java` | 由上述入口驱动的场景/调度观察；前者不新增事件订阅或独立运行开关 |
+| `client/M4RepeatCraftScenario.java` | inventory 入口内的四次实际 C 手势，覆盖开/关筛选、显示/列表/页码/会话稳定及权威资源版本推进 |
 | `recipe/M48ClientKnowledgeProbe.java`、`M47ServerSmoke.java` | 客户端目录取证 / knowledge 专服入口 |
 
 GameTest 当前依赖 NeoForge 发现及包内测试接口，继续留在 main 源集；开发客户端夹具不打入 JAR。不能因“所有测试放一起”而暴露核心私有接口或改变发现方式。
@@ -53,5 +54,5 @@ GameTest 当前依赖 NeoForge 发现及包内测试接口，继续留在 main �
 - [数据包夹具](datapacks/README.md) 用于真实配方/标签重载；不自动安装到玩家存档。
 - 自动计数证明“零服务端逐目标浏览”“见证验证零完整重搜”，玩家不必靠速度猜测或构造恶意包。
 - 低配、大目录端到端、1/16/64 容器与 1/2/8 真实客户端高 RTT 矩阵属 M8 扩展观测；不能为了收口把它们标为已通过。
-- 本次删除七项退役 JUnit 后为 62 项；GameTest 保持 90 项。数量不是覆盖率，变更后应核对实际报告而非只对总数。
+- 清理批次删除七项退役 JUnit 后为 62 项；连续 C 修复增加三项显示/证据隔离及无变化不重建回归，共 65 项，GameTest 保持 90 项。数量不是覆盖率，变更后应核对实际报告而非只对总数。
 - [当前进展与清理证据](../docs/17-m4-progress.md) 记录本轮结果；历史日志保留，不据历史通过替代新构建验收。

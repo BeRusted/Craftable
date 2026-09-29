@@ -43,6 +43,15 @@ public final class CraftablePayloadHandlers {
     }
     static void stopBrowsing() { BROWSERS.clear(); browseCursor = transferCursor = 0; }
 
+    private static void refreshAfterAttempt(ServerPlayer player) {
+        var transfer = BROWSERS.get(player.getUUID());
+        if (transfer != null) {
+            // Push a fresh capture on the next admitted round-robin turn, not
+            // a new client session. Keep fairness, byte limits and source refs.
+            transfer.nextScan = Long.MIN_VALUE;
+        }
+    }
+
     /** Existing admission accounting covers discovery and encoding. Two
      * round-robin cursors separately bound preparation and wire traffic; slow
      * receivers do not get additional per-target searches or larger budgets. */
@@ -162,6 +171,7 @@ public final class CraftablePayloadHandlers {
                 try (var lease = CraftableRequestLimiter.planning(player.getServer(), player.getUUID(), true)) {
                     if (lease.allowed()) {
                         var result = CraftingService.confirm(player, payload.token(), payload.witness(), payload.revision());
+                        refreshAfterAttempt(player);
                         var target = result.plan() == null ? payload.recipe() : result.plan().target();
                         context.reply(CreateRecipeResultPayload.from(target, payload.revision(), result));
                         return;
@@ -219,6 +229,7 @@ public final class CraftablePayloadHandlers {
                 }
                 var result = CraftingService.attempt(player, payload.recipeId(), payload.requestId(),
                         payload.precedingPress(), payload.allowDrops(), payload.partialPolicy());
+                refreshAfterAttempt(player);
                 context.reply(CreateRecipeResultPayload.from(payload.recipeId(), payload.requestId(), result));
             }
         });

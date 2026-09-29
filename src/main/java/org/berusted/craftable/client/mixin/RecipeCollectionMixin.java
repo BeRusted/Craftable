@@ -39,7 +39,7 @@ public abstract class RecipeCollectionMixin {
             if (!RecipeBookProjection.visible(recipe)) continue;
             known.add(recipe);
             fitsDimensions.add(recipe);
-            if (ClientRecipeStatusStore.get(recipe.id(), false) == CraftingStatus.CRAFTABLE) craftable.add(recipe);
+            if (ClientRecipeStatusStore.display(recipe.id(), false) == CraftingStatus.CRAFTABLE) craftable.add(recipe);
         }
         ci.cancel();
     }

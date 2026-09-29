@@ -17,7 +17,7 @@ import org.berusted.craftable.client.mixin.RecipeBookPageAccessor;
 @EventBusSubscriber(modid = Craftable.MOD_ID, value = Dist.CLIENT)
 public final class RecipeBookStatusHandler {
     private static long lastTick = Long.MIN_VALUE, displayedRevision = -1;
-    private static long displayedAt = Long.MIN_VALUE, displayedAuthority = -1;
+    private static long displayedAt = Long.MIN_VALUE;
     private static Object currentView;
     private RecipeBookStatusHandler() {}
 
@@ -32,17 +32,16 @@ public final class RecipeBookStatusHandler {
         lastTick = now;
         if (currentView != component) { currentView = component; displayedRevision = -1; }
         if (!component.isVisible()) { ClientBrowsePlanner.scope(List.of(), List.of(), List.of()); return; }
-        if (displayedRevision != ClientRecipeStatusStore.revision()
-                && (displayedRevision == -1 || displayedAuthority != ClientRecipeStatusStore.authorityRevision()
-                    || now < displayedAt || now - displayedAt >= 4)) {
+        if (displayedRevision != ClientRecipeStatusStore.presentationRevision()
+                && (displayedRevision == -1 || now < displayedAt || now - displayedAt >= 4)) {
             // Merge results before render, never from a network callback while
             // vanilla is indexing an animated button's previous collection.
             var contents = new net.minecraft.world.entity.player.StackedContents();
             for (var collection : mc.player.getRecipeBook().getCollections())
                 collection.canCraft(contents, 3, 3, mc.player.getRecipeBook());
             component.recipesUpdated();
-            displayedRevision = ClientRecipeStatusStore.revision();
-            displayedAuthority = ClientRecipeStatusStore.authorityRevision(); displayedAt = now;
+            displayedRevision = ClientRecipeStatusStore.presentationRevision();
+            displayedAt = now;
         }
         var page = ((RecipeBookComponentAccessor) component).craftable$getRecipeBookPage();
         var access = (RecipeBookPageAccessor) page;
@@ -59,9 +58,8 @@ public final class RecipeBookStatusHandler {
         ClientBrowsePlanner.scope(foreground, scope, hovered);
     }
 
-    public static void afterCreate(long barrier) {
-        ClientRecipeStatusStore.invalidate(barrier);
-        ClientBrowsePlanner.invalidate();
+    public static void afterCreate(ResourceLocation recipe) {
+        ClientBrowsePlanner.afterCreate(recipe);
     }
     public static void clearRequestState() {
         lastTick = Long.MIN_VALUE; displayedRevision = -1; currentView = null;

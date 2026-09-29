@@ -12,6 +12,45 @@ class ClientRecipeStatusStoreTest {
     private static final ResourceLocation RECIPE = ResourceLocation.withDefaultNamespace("diamond_pickaxe");
     @AfterEach void clearStore() { ClientRecipeStatusStore.clear(); }
 
+    @Test void refreshRetainsPresentationButDiscardsEvidenceAndDoesNotAuthorizeCrafting() {
+        ClientRecipeStatusStore.beginLocal(); ClientRecipeStatusStore.authorizeLocal(true);
+        ClientRecipeStatusStore.completeLocal(RECIPE, CraftingStatus.CRAFTABLE, CraftingResultCode.CREATED, null, false);
+        ClientRecipeStatusStore.beginRefresh();
+        assertEquals(CraftingStatus.CRAFTABLE, ClientRecipeStatusStore.display(RECIPE, false));
+        assertEquals(CraftingStatus.BLOCKED, ClientRecipeStatusStore.get(RECIPE, false));
+        assertFalse(ClientRecipeStatusStore.computed(RECIPE));
+        assertNull(ClientRecipeStatusStore.evidence(RECIPE));
+        assertEquals(ClientRecipeStatusStore.Lifecycle.PENDING, ClientRecipeStatusStore.lifecycle(RECIPE));
+        ClientRecipeStatusStore.authorizeLocal(true);
+        assertEquals(ClientRecipeStatusStore.Lifecycle.PENDING, ClientRecipeStatusStore.lifecycle(RECIPE));
+        ClientRecipeStatusStore.completeLocal(RECIPE, SearchResult.blocked(CraftingResultCode.MISSING_INGREDIENTS), null, false);
+        assertEquals(CraftingStatus.BLOCKED, ClientRecipeStatusStore.display(RECIPE, false));
+        assertEquals(ClientRecipeStatusStore.Lifecycle.KNOWN, ClientRecipeStatusStore.lifecycle(RECIPE));
+    }
+
+    @Test void repeatedRefreshCannotLoseDisplayAndNewMenuCannotInheritIt() {
+        ClientRecipeStatusStore.beginLocal();
+        ClientRecipeStatusStore.completeLocal(RECIPE, CraftingStatus.CRAFTABLE, CraftingResultCode.CREATED, null, false);
+        for (int i = 0; i < 50; i++) ClientRecipeStatusStore.beginRefresh();
+        assertEquals(CraftingStatus.CRAFTABLE, ClientRecipeStatusStore.display(RECIPE, false));
+        assertFalse(ClientRecipeStatusStore.computed(RECIPE));
+        ClientRecipeStatusStore.beginLocal();
+        assertFalse(ClientRecipeStatusStore.hasDisplay(RECIPE));
+        assertEquals(CraftingStatus.BLOCKED, ClientRecipeStatusStore.display(RECIPE, false));
+    }
+
+    @Test void sameDisplayAfterRefreshDoesNotRequestACollectionRebuild() {
+        ClientRecipeStatusStore.beginLocal();
+        ClientRecipeStatusStore.completeLocal(RECIPE, CraftingStatus.CRAFTABLE, CraftingResultCode.CREATED, null, false);
+        long shown = ClientRecipeStatusStore.presentationRevision();
+        ClientRecipeStatusStore.beginRefresh();
+        ClientRecipeStatusStore.authorizeLocal(true);
+        ClientRecipeStatusStore.completeLocal(RECIPE, CraftingStatus.CRAFTABLE, CraftingResultCode.CREATED, null, false);
+        assertEquals(shown, ClientRecipeStatusStore.presentationRevision());
+        ClientRecipeStatusStore.completeLocal(RECIPE, SearchResult.blocked(CraftingResultCode.MISSING_INGREDIENTS), null, false);
+        assertEquals(shown + 1, ClientRecipeStatusStore.presentationRevision());
+    }
+
     @Test void authorizationRenewalKeepsComputedUnknownWithoutGrantingRetry() {
         ClientRecipeStatusStore.beginLocal();
         ClientRecipeStatusStore.completeLocal(RECIPE, SearchResult.blocked(CraftingResultCode.SEARCH_BUDGET_EXCEEDED), null, false);

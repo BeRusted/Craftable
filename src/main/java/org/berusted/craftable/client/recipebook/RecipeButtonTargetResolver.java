@@ -29,7 +29,7 @@ public final class RecipeButtonTargetResolver {
         RecipeCollection collection = button.getCollection();
         List<CraftingStatus> statuses = new ArrayList<>();
         for (RecipeHolder<?> candidate : candidates(button)) {
-            statuses.add(ClientRecipeStatusStore.get(
+            statuses.add(ClientRecipeStatusStore.display(
                     candidate.id(), collection.isCraftable(candidate)));
         }
         return strongestStatus(statuses);
@@ -45,7 +45,7 @@ public final class RecipeButtonTargetResolver {
         for (RecipeHolder<?> candidate : candidates) {
             boolean vanillaStatus = collection.isCraftable(candidate);
             vanillaCraftable.add(vanillaStatus);
-            statuses.add(ClientRecipeStatusStore.get(candidate.id(), vanillaStatus));
+            statuses.add(ClientRecipeStatusStore.display(candidate.id(), vanillaStatus));
         }
         // Selection is independent of the animation index, including the frame
         // between a tab/page change and vanilla's next renderWidget update.
@@ -69,7 +69,7 @@ public final class RecipeButtonTargetResolver {
         var recipes = candidates(button);
         var target = preferredRecipe(button);
         if (target == null) return ClientRecipeStatusStore.Lifecycle.UNKNOWN;
-        if (ClientRecipeStatusStore.get(target.id(), false) == CraftingStatus.CRAFTABLE) {
+        if (ClientRecipeStatusStore.display(target.id(), false) == CraftingStatus.CRAFTABLE) {
             return ClientRecipeStatusStore.lifecycle(target.id());
         }
         boolean unknown = false;

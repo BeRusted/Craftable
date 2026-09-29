@@ -13,11 +13,14 @@ import org.berusted.craftable.planner.CraftRequest;
 public final class ClientRecipeStatusStore {
     public enum Lifecycle { UNKNOWN, PENDING, KNOWN }
     private static final HashMap<CraftRequest, StatusEntry> STATUSES = new HashMap<>();
+    // Presentation only: never contains proofs/plans and is never read by the solver.
+    // Retain across resource replacement, but not menus, reloads or connections.
+    private static final HashMap<ResourceLocation, DisplayEntry> DISPLAY = new HashMap<>();
     private static boolean drops = true;
     private static CraftRequest.PartialPolicy policy = CraftRequest.PartialPolicy.EXPLICIT_SAFE;
-    private static long revision, authorityRevision;
+    private static long revision, authorityRevision, presentationRevision;
     private static boolean local, authorized;
-    private static long retainedBytes;
+    private static long retainedBytes, displayBytes;
     private static final long MAX_RESULT_BYTES = 2L * 1024 * 1024;
     private ClientRecipeStatusStore() {}
 
@@ -29,7 +32,18 @@ public final class ClientRecipeStatusStore {
 
     public static Lifecycle lifecycle(ResourceLocation id) {
         if (local && !authorized) return Lifecycle.PENDING;
+        if (!STATUSES.containsKey(key(id)) && DISPLAY.containsKey(id)) return Lifecycle.PENDING;
         return STATUSES.containsKey(key(id)) ? Lifecycle.KNOWN : Lifecycle.UNKNOWN;
+    }
+
+    public static CraftingStatus display(ResourceLocation id, boolean vanillaCraftable) {
+        var entry = DISPLAY.get(id);
+        return entry == null ? get(id, vanillaCraftable) : entry.status();
+    }
+    public static boolean hasDisplay(ResourceLocation id) { return DISPLAY.containsKey(id); }
+    public static CraftingResultCode displayReason(ResourceLocation id) {
+        var entry = DISPLAY.get(id);
+        return entry == null ? reason(id) : entry.code();
     }
 
     public static CraftingResultCode reason(ResourceLocation id) {
@@ -41,12 +55,21 @@ public final class ClientRecipeStatusStore {
     public static void clear() {
         local = authorized = false;
         STATUSES.clear();
-        retainedBytes = 0;
-        revision++; authorityRevision++;
+        DISPLAY.clear();
+        retainedBytes = displayBytes = 0;
+        revision++; authorityRevision++; presentationRevision++;
     }
     public static long revision() { return revision; }
     public static long authorityRevision() { return authorityRevision; }
+    public static long presentationRevision() { return presentationRevision; }
     public static void beginLocal() { clear(); local = true; }
+    public static void beginRefresh() {
+        // A resource change invalidates ALL execution evidence (capacity alone
+        // can affect unrelated targets), not the last displayed button colors.
+        STATUSES.clear(); retainedBytes = 0;
+        local = true;
+        authorizeLocal(false);
+    }
     public static void authorizeLocal(boolean value) {
         if (local && authorized != value) { authorized = value; revision++; authorityRevision++; }
     }
@@ -58,8 +81,10 @@ public final class ClientRecipeStatusStore {
     public static boolean canRecord(ResourceLocation id) { return canRecord(key(id)); }
     public static boolean computed(CraftRequest request) { return STATUSES.containsKey(request.withPartial(false)); }
     public static boolean canRecord(CraftRequest request) {
-        return computed(request) || STATUSES.size() < 16_384 && retainedBytes + weight(request) <= MAX_RESULT_BYTES;
+        return computed(request) || STATUSES.size() < 16_384
+                && retainedBytes + displayBytes + weight(request) + displayWeight(request.recipe()) <= MAX_RESULT_BYTES;
     }
+    private static long displayWeight(ResourceLocation id) { return 128L + 2L * id.toString().length(); }
     private static long weight(CraftRequest request) {
         // Extended identities include constraint strings, not only a recipe ID.
         // Account them before insertion inside the existing 2 MiB result reserve.
@@ -102,7 +127,13 @@ public final class ClientRecipeStatusStore {
         var next = new StatusEntry(status, code, evidence, diagnosed);
         if (!STATUSES.containsKey(request)) retainedBytes += weight(request);
         if (!next.equals(STATUSES.put(request, next))) revision++;
+        if (request.equals(key(request.recipe()))) {
+            if (!DISPLAY.containsKey(request.recipe())) displayBytes += displayWeight(request.recipe());
+            var display = new DisplayEntry(status, code);
+            if (!display.equals(DISPLAY.put(request.recipe(), display))) presentationRevision++;
+        }
     }
+    private record DisplayEntry(CraftingStatus status, CraftingResultCode code) {}
     private record StatusEntry(CraftingStatus status, CraftingResultCode code,
             CraftSearch.FullEvidence evidence, boolean diagnosed) {}
 }

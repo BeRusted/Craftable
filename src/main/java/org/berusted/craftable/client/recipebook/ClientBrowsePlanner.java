@@ -38,6 +38,7 @@ public final class ClientBrowsePlanner {
     private static CraftSearch.Reachability closure;
     private static List<ResourceLocation> foreground = List.of(), hidden = List.of(), hovered = List.of();
     private static Task front, background;
+    private static ResourceLocation lastCrafted;
     private static boolean drops;
     private static CraftRequest.PartialPolicy policy;
     private static long searches, slices;
@@ -103,7 +104,7 @@ public final class ClientBrowsePlanner {
                         && decoded.recipes() == receiving.recipes() && decoded.resources() == receiving.resources()
                         && decoded.session().equals(grant.session()) && decoded.resources() == grant.resources()
                         && decoded.recipes() == grant.recipes()) {
-                    snapshot = decoded; input = null; resetCalculations(); sentAt = Long.MIN_VALUE;
+                    snapshot = decoded; input = null; resetCalculations();
                 }
                 decoder.close(); decoder = null;
             } catch (RuntimeException failure) {
@@ -147,6 +148,13 @@ public final class ClientBrowsePlanner {
 
     private static boolean dispatch(long sliceStart) {
         if (front == null) {
+            // Revalidate the target under the pointer before the rest of the
+            // visible page, without bypassing the existing hidden-task turn.
+            if (lastCrafted != null && detail == null) {
+                if ((background == null || !background.id.equals(lastCrafted)) && needsSearch(lastCrafted))
+                    front = task(lastCrafted, false);
+                lastCrafted = null;
+            }
             for (var id : hovered) if (front == null && detail == null && ClientRecipeStatusStore.needsDiagnostic(id)
                     && (background == null || !background.id.equals(id))) { front = task(id, true); break; }
             if (front == null && detail == null) for (var id : foreground) {
@@ -380,14 +388,17 @@ public final class ClientBrowsePlanner {
 
     public static void receive(CraftingDetailPayloads.BrowseLease value) {
         if (!accepts(value.menuId(), value.revision())) return;
-        if (grant != null && value.recipes() < grant.recipes()) return;
+        if (value.recipes() < recipeVersion) return;
+        if (snapshot != null && snapshot.session().equals(value.session()) && value.resources() < snapshot.resources()) return;
         if (recipeVersion != value.recipes()) {
             recipeVersion = value.recipes(); generation = new Object(); CATALOG.clear(); input = null;
+            ClientRecipeStatusStore.beginLocal(); // A recipe reload is not an inventory refresh.
             resetCalculations();
         }
         grant = value;
         org.berusted.craftable.client.menu.AmbientInventoryEvents.receiveRules(value.settings(), value.workbench());
         if (snapshot != null && (!snapshot.session().equals(value.session()) || snapshot.resources() != value.resources())) {
+            if (!snapshot.session().equals(value.session())) ClientRecipeStatusStore.beginLocal();
             snapshot = null; input = null; resetCalculations();
         }
         if (value.header() != null) {
@@ -425,7 +436,7 @@ public final class ClientBrowsePlanner {
         if (background != null) background.search.cancel();
         front = background = null; closure = null;
         resetDetails();
-        ClientRecipeStatusStore.beginLocal();
+        ClientRecipeStatusStore.beginRefresh();
     }
 
     private static void resetDetails() {
@@ -433,9 +444,21 @@ public final class ClientBrowsePlanner {
     }
 
     public static void invalidate() {
-        // Rotate view nonce after an action; queued pre-action grants cannot
-        // make old green results fresh while the replacement snapshot arrives.
+        // Hard reset for explicit refresh/lifecycle boundaries only. Ordinary
+        // crafting keeps this session and follows afterCreate's lease barrier.
         closeView();
+        ClientRecipeStatusStore.beginLocal();
+    }
+
+    public static void afterCreate(ResourceLocation recipe) {
+        if (menu == null) return;
+        lastCrafted = recipe;
+        // Keep the browse nonce and the last page. Ordered play packets ensure
+        // pre-action leases precede the result; only a later lease can renew
+        // authority. Pending old chunks cannot publish without that new lease.
+        grant = null;
+        ClientRecipeStatusStore.authorizeLocal(false);
+        resetDetails();
     }
 
     public static void recipesChanged() {
@@ -452,6 +475,7 @@ public final class ClientBrowsePlanner {
         if (decoder != null) decoder.close(); decoder = null;
         if (front != null) front.search.cancel(); if (background != null) background.search.cancel();
         front = background = null; closure = null;
+        lastCrafted = null;
         resetDetails();
         ClientRecipeStatusStore.authorizeLocal(false);
     }

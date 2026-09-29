@@ -42,6 +42,7 @@ public final class M3ClientSmoke {
     private static volatile boolean configured;
     private static long quietSequence;
     private static long previewStart;
+    private static final M4RepeatCraftScenario repeatCraft = new M4RepeatCraftScenario();
     private static boolean wideEffectsRendered, compactEffectsRendered;
     private static int savedScale = -1;
     private static final java.util.List<Long> previewSamples = new java.util.ArrayList<>();
@@ -123,6 +124,7 @@ public final class M3ClientSmoke {
                 ((AmbientInventoryScreen) mc.screen).getRecipeBookComponent().recipesUpdated();
                 advance();
             } else if (stage == 5 && age > 40) {
+                if (!repeatCraft.tick(mc)) return;
                 require(button().getCollection().hasCraftable(), "Craftable filter removed chest recipe");
                 Screenshot.grab(mc.gameDirectory, "m3-smoke-filtered.png", mc.getMainRenderTarget(), ignored -> {});
                 mc.getSingleplayerServer().execute(() -> mc.getSingleplayerServer().overworld().setBlockAndUpdate(TABLE, Blocks.AIR.defaultBlockState()));
@@ -172,7 +174,7 @@ public final class M3ClientSmoke {
                 PacketDistributor.sendToServer(new CreateRecipeRequestPayload(STICK, ClientRequestSequence.next()));
                 advance();
             } else if (stage == 12 && age > 30) {
-                require(mc.player.getInventory().countItem(Items.STICK) == 8, "Physical workbench C failed");
+                require(mc.player.getInventory().countItem(Items.STICK) == 24, "Physical workbench C failed");
                 mc.player.closeContainer();
                 mc.setScreen(new InventoryScreen(mc.player));
                 advance();
@@ -244,7 +246,7 @@ public final class M3ClientSmoke {
                 advance();
             } else if (stage == 23) {
                 if (previewStart == 0) {
-                    RecipeBookStatusHandler.afterCreate(ClientRequestSequence.next());
+                    RecipeBookStatusHandler.afterCreate(STICK);
                     previewStart = System.nanoTime();
                 } else if (ClientRecipeStatusStore.lifecycle(STICK) == ClientRecipeStatusStore.Lifecycle.KNOWN
                         && ClientRecipeStatusStore.reason(STICK) != org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED) {
