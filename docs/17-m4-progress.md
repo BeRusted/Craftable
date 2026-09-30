@@ -103,11 +103,19 @@
 - 最终基线 `run/verification/20260930-185631-064-baseline/`：65 项 JUnit 实际执行，失败/错误/跳过为 0；98 项 GameTest 全通过，构建成功。详情客户端 `run/verification/20260930-185944-571-planning/`：`M4_GRAPH_PRESENTATION PASS`、`M4_SMOKE PASS`；候选/约束、混合 MAX、部分↔完整更新、小刷新、语言/GUI 回归通过，完整确认 `witnessValidations=2, fullSearches=0`。40 次刷新 P50 245.9131 ms、P95 404.1879 ms、最大 405.7297 ms；不据本机样本推导所有硬件/局域网的性能保证。
 - 已检查本批 `m4-smoke-graph.png`、`m4-smoke-mixed-graph.png`：圆弧箭头可辨，白芯交界连续，混合原料仍分支、木板 12/木棍 24 的汇总不变。数量/全部路径等价合并由只读夹具断言；实际船图和合并节点换配方仍须人工确认。本轮未重跑 inventory/knowledge，不宣称 all 或真实两设备验收完成。
 - 新增人工优先 [C.13–14、D.7](18-m4-acceptance.md)；M4 仍未关闭。
+- 该批构建已被下述 UI 遗留清理替代：519605 字节，SHA-256 `651FD00A609872EC23AFF33A4130D69D06BF06865DF2C4148D5D3DA28C068B47`，仅保留作历史证据对应。
+
+### 3.9 UI 简化后的遗留清理
+
+- 入口审计确认：单一“合成”按钮只提交当前意图，意图/数量变化清除排队点击；旧 `act(boolean allowPartial)` 的意图切换分支已无正常入口。改为 `act()`，排队字段改为普通布尔标记，不再保存旧双按钮的完整/部分参数。MAX 点击只排队一次、变化/关闭取消、授权/审阅/确认路径保持不变，既有客户端断言同步调整字段语义。
+- 删除中英文各 11 个仅存在于语言文件、代码无引用的旧文案：`partial_ready`、`costs`、`steps`、`usable`、`all`、`review_again`、`workstations`、`ready`、`max_cap`、`quantity`、`from_step`（均为 `screen.craftable.plan.` 前缀）。同时删除本地浏览 tick 中未使用的 `menuId`。审计覆盖直接翻译引用、动态 `text`/收支标题和测试调用；两份 JSON 解析、键集合一致性及现有图/详情翻译引用检查通过。
+- 候选 Tooltip 和混合路线的 COSTS 审阅仍有真实入口，未删除；部分意图的只读自动切换也继续保留。不改求解器、账本、事务、协议或测试运行入口；本轮不新增玩法和人工测试项，沿用 [C.4、C.9、D.2](18-m4-acceptance.md) 的完整/部分、排队取消及混合审阅复测。
+- 清理后基线 `run/verification/20260930-202124-326-baseline/`：65 项 JUnit 实际执行，失败/错误/跳过为 0；98 项 GameTest 全通过，构建成功。客户端 `run/verification/20260930-202431-597-planning/` 的 `M4_GRAPH_PRESENTATION PASS`、`M4_SMOKE PASS` 均通过，覆盖单一按钮的完整/部分、MAX 排队/Esc 取消、混合收支复核、中英文及 GUI 比例；完整确认仍为 `witnessValidations=2, fullSearches=0`。本轮未重跑 inventory/knowledge 或真实两设备，不宣称 all/M4 人工验收完成。
 
 ## 4. 当前构建与证据边界
 
-- 文件：`build/libs/craftable-0.1.0-SNAPSHOT.jar`，519605 字节，协议仍为 9（无网络包结构变化）。
-- SHA-256：`651FD00A609872EC23AFF33A4130D69D06BF06865DF2C4148D5D3DA28C068B47`。
+- 文件：`build/libs/craftable-0.1.0-SNAPSHOT.jar`，519032 字节，协议仍为 9（无网络包结构变化）。
+- SHA-256：`2B605F02AB01ACAD1ED31D9DBA0156F95666ED7DCC180582833CBFD9C429718D`。
 - 两端同时替换 JAR，优先完成 C.13–14、D.7 的图展示、节点汇总与合并换配方，再继续原有 UI/自动刷新、缺口诊断、统计、J.11 及 A–L 中尚未完成的人工项目；真实耗尽/末页变化允许正常筛选调整，不允许刷新中清空重建。
 
 旧版本记录只用于对照历史证据，不供当前联机安装。提交后观察器故障注入会产生预期 ERROR，密集基准可能触发落后警告；应检查最终断言和上下文，不能简单以“没有 WARN/ERROR”为通过条件。

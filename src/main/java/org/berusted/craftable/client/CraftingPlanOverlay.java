@@ -62,7 +62,7 @@ public final class CraftingPlanOverlay extends Screen {
     private String choicePath = "";
     private final Map<ResourceLocation, CraftingResultCode> candidateStates = new java.util.HashMap<>();
     private Button applyChoice, previousChoice, nextChoice, automaticChoice;
-    private Boolean queuedAction;
+    private boolean queuedAction;
     private ResourceLocation testingCandidate;
     private List<Object> singleRoute = List.of();
     private boolean routeChanged;
@@ -115,7 +115,7 @@ public final class CraftingPlanOverlay extends Screen {
         if (displayedView != null) graph.show(displayedView);
         graph.visible = pane == Pane.GRAPH;
         slider = addRenderableWidget(new CountSlider(14, height - 34, sliderWidth));
-        create = button(18 + sliderWidth, height - 34, available - sliderWidth - 4, text("create"), () -> act(intent.partial()));
+        create = button(18 + sliderWidth, height - 34, available - sliderWidth - 4, text("create"), this::act);
         refresh = addRenderableWidget(new RefreshButton(width - 38, height - 86));
         // The chooser is one visual recipe card. Candidate replies update it
         // in place, never replace focused widgets or flash a list of buttons.
@@ -231,7 +231,7 @@ public final class CraftingPlanOverlay extends Screen {
         changedAt = System.nanoTime();
         if (resetMaximum) maximum = null;
         draft = null;
-        queuedAction = null;
+        queuedAction = false;
         if (pending != Work.CONFIRM && pending != Work.AUTHORIZE) {
             pending = null; inFlight = -1;
             // Finish the bounded running search into the shared result store.
@@ -240,18 +240,14 @@ public final class CraftingPlanOverlay extends Screen {
         controls();
     }
 
-    private void act(boolean allowPartial) {
+    private void act() {
         if (dirty || draft == null || pane == Pane.CHOICES) return;
         // MAX is read-only and keeps the current token. Accept one explicit
         // click while its bounded slice finishes instead of blinking buttons.
-        // A changed intent cancels this slot; confirmation is never retried.
-        if (pending == Work.MAXIMUM) { queuedAction = allowPartial; controls(); return; }
+        // The single button always submits the displayed intent. A changed
+        // intent cancels this slot; confirmation is never retried.
+        if (pending == Work.MAXIMUM) { queuedAction = true; controls(); return; }
         if (pending != null) return;
-        if (intent.partial() != allowPartial) {
-            notice = Component.empty();
-            change(intent.withPartial(allowPartial), false);
-            return;
-        }
         if (!localDraft && draft.token().equals(CraftingDetailPayloads.NO_TOKEN)) return;
         if (routeChanged && pane != Pane.COSTS) {
             switchPane(Pane.COSTS);
@@ -300,7 +296,7 @@ public final class CraftingPlanOverlay extends Screen {
             if (System.nanoTime() - sentAt < 5_000_000_000L) return;
             boolean wasConfirm = pending == Work.CONFIRM || pending == Work.AUTHORIZE || pending == Work.FALLBACK;
             pending = null; inFlight = -1;
-            queuedAction = null;
+            queuedAction = false;
             if (wasConfirm) {
                 notice = text("unknown_result");
                 dirty = false;
@@ -324,7 +320,6 @@ public final class CraftingPlanOverlay extends Screen {
         }
         unavailableSince = 0;
         if (System.nanoTime() - sentAt < 200_000_000L) return;
-        int menuId = minecraft.player.containerMenu.containerId;
         if (dirty && System.nanoTime() - changedAt >= 150_000_000L) {
             dirty = false;
             ClientBrowsePlanner.preview(begin(Work.PREVIEW), intent, choicePath);
@@ -417,11 +412,10 @@ public final class CraftingPlanOverlay extends Screen {
         if (self.sentGeneration != self.generation) return;
         self.maximum = maximum;
         self.slider.syncValue();
-        if (self.queuedAction != null) {
-            boolean action = self.queuedAction;
-            self.queuedAction = null;
+        if (self.queuedAction) {
+            self.queuedAction = false;
             ClientBrowsePlanner.cancelDetails(); self.pending = null;
-            self.act(action);
+            self.act();
         }
         self.controls();
     }
@@ -446,7 +440,7 @@ public final class CraftingPlanOverlay extends Screen {
 
     private void controls() {
         if (create == null) return;
-        boolean ready = draft != null && !dirty && queuedAction == null
+        boolean ready = draft != null && !dirty && !queuedAction
                 && (pending == null || pending == Work.MAXIMUM) && pane != Pane.CHOICES;
         boolean token = ready && (localDraft && ClientBrowsePlanner.ready()
                 || !draft.token().equals(CraftingDetailPayloads.NO_TOKEN));
@@ -688,7 +682,7 @@ public final class CraftingPlanOverlay extends Screen {
             // Do not rebuild the dragged widget: that loses vanilla pointer
             // capture. Only replace the intent; debounce the server request.
             intent = intent.withBatches(count);
-            generation++; dirty = true; draft = null; queuedAction = null; changedAt = System.nanoTime();
+            generation++; dirty = true; draft = null; queuedAction = false; changedAt = System.nanoTime();
             controls();
         }
         @Override public void onRelease(double x, double y) {

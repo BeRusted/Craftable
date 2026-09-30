@@ -84,7 +84,7 @@ public final class M4ClientSmoke {
                     && !(boolean) field(overlay(), "dirty") && !((CraftRequest) field(overlay(), "intent")).partial()
                     && field(overlay(), "pane").toString().equals("GRAPH")
                     && field(overlay(), "pending") != null && field(overlay(), "pending").toString().equals("MAXIMUM")
-                    && field(overlay(), "queuedAction") == null)
+                    && Boolean.FALSE.equals(field(overlay(), "queuedAction")))
                 require(((Button) field(overlay(), "create")).active, "MAX slice blinked the confirm button");
             if (++age > (stage == 3 ? 1400 : 600)) throw new AssertionError("Timeout at stage " + stage + ", pending="
                     + (overlay() == null ? "closed" : field(overlay(), "pending") + ", max=" + field(overlay(), "maximum")
@@ -378,7 +378,7 @@ public final class M4ClientSmoke {
                     && field(overlay(), "pending") != null && field(overlay(), "pending").toString().equals("MAXIMUM")) {
                 var create = (Button) field(overlay(), "create");
                 click(create.getX() + 5, create.getY() + 5);
-                require(Boolean.FALSE.equals(field(overlay(), "queuedAction")), "MAX click was lost instead of queued once");
+                require(Boolean.TRUE.equals(field(overlay(), "queuedAction")), "MAX click was lost instead of queued once");
                 key(256, 0);
                 require(!CraftingPlanOverlay.active(), "Esc did not cancel waiting action");
                 queuedCancellationChecked = true;
