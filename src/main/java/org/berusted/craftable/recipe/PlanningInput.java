@@ -104,6 +104,28 @@ public final class PlanningInput {
     public boolean fullySupported() { return index.valueRecipes.size() == index.ordered.size(); }
     public boolean workbench() { return workbench; }
 
+    /** A nested exact inverse cannot supply a deficit: it first needs the very
+     * material its parent would produce. Existing stock is consumed directly
+     * by search instead. Only normalize fixed, component-free, remainder-free
+     * ordinary conversions; lossy/gaining or alternative-input recipes are NOT
+     * equivalent and must keep their normal bounded search semantics. */
+    public boolean isExactInverse(CraftingRecipes.Entry first, CraftingRecipes.Entry second) {
+        return first != null && second != null
+                && index.valueRecipes.contains(first.id()) && index.valueRecipes.contains(second.id())
+                && homogeneousInputs(first, second.output()) && homogeneousInputs(second, first.output());
+    }
+
+    private boolean homogeneousInputs(CraftingRecipes.Entry recipe, ItemStack oppositeOutput) {
+        var remainder = index.remainders.get(oppositeOutput.getItem());
+        if (!oppositeOutput.getComponentsPatch().isEmpty() || remainder == null || !remainder.isEmpty()
+                || recipe.requirements().size() != oppositeOutput.getCount()) return false;
+        for (var requirement : recipe.requirements()) {
+            var options = requirement.ingredient().getItems();
+            if (options.length != 1 || !ItemStack.isSameItemSameComponents(options[0], oppositeOutput)) return false;
+        }
+        return true;
+    }
+
     public CraftingResultCode unavailable(CraftingRecipes.Entry entry) {
         if (entry == null || !index.valueRecipes.contains(entry.id())) return CraftingResultCode.UNSUPPORTED_RECIPE;
         if (limited && !unlocked.contains(entry.id())) return CraftingResultCode.RECIPE_LOCKED;

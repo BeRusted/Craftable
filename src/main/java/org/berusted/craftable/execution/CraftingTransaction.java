@@ -25,6 +25,7 @@ final class CraftingTransaction {
     static CraftingResultCode execute(ServerPlayer player, CraftPlan plan, EnvironmentSnapshot snapshot,
             MainInventoryInsertion.Delivery delivery) {
         if (!CraftingService.validContext(player)) return CraftingResultCode.INVALID_CONTEXT;
+        if (!plan.hasMaterialChange()) return CraftingResultCode.MISSING_INGREDIENTS;
         List<SlotBackup> otherSlots = new ArrayList<>();
         for (var extraction : plan.extractions()) {
             var endpoint = snapshot.endpoint(extraction.endpointId()).orElse(null);
@@ -118,6 +119,16 @@ final class CraftingTransaction {
     }
 
     private static void notifyCrafted(ServerPlayer player, CraftPlan plan, List<ItemEntity> drops) {
+        // Vanilla counts opening a physical table, not each result-slot take.
+        // A Craftable action is one virtual interaction, even for many batches
+        // or intermediates. Count only a committed chain actually using 3x3;
+        // previews, rollbacks and 2x2-only partial preparation never count.
+        if (plan.steps().stream().anyMatch(step -> step.gridSize() == 3)) {
+            try { player.awardStat(Stats.INTERACT_WITH_CRAFTING_TABLE); }
+            catch (RuntimeException exception) {
+                Craftable.LOGGER.error("Post-commit workbench statistic failed", exception);
+            }
+        }
         for (var step : plan.steps()) {
             // Post-commit observers also see intermediate crafts. One failing
             // listener must neither refund the chain nor suppress later steps.

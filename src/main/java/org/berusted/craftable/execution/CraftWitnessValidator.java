@@ -89,8 +89,13 @@ final class CraftWitnessValidator {
             int spare = 0, smallest = Integer.MAX_VALUE;
             for (int j = 0; j < steps.size(); j++) {
                 var other = steps.get(j);
-                if (other.path().startsWith(step.path() + "."))
+                if (other.path().startsWith(step.path() + ".")) {
                     require(!step.recipe().id().equals(other.recipe().id()));
+                    // Match search's adjacent-inverse normalization, including
+                    // a no-op hidden inside an otherwise productive chain.
+                    if (other.path().lastIndexOf('.') == step.path().length())
+                        require(!supported.isExactInverse(recipes.find(step.recipe().id()), recipes.find(other.recipe().id())));
+                }
                 if (!other.path().equals("0") && ItemStack.isSameItemSameComponents(outputs.get(i), outputs.get(j))) {
                     spare = Math.addExact(spare, outputs.get(j).getCount() - usedOutputs[j]);
                     smallest = Math.min(smallest, outputs.get(j).getCount());
@@ -98,9 +103,11 @@ final class CraftWitnessValidator {
             }
             require((step.path().equals("0") || spare < smallest) && budget.alive());
         }
-        return new CraftPlan(request.recipe(), request.batches(), roots, steps, ledger.extractions(),
+        var plan = new CraftPlan(request.recipe(), request.batches(), roots, steps, ledger.extractions(),
                 ledger.delivery(true), ledger.delivery(false), List.of(),
                 steps.stream().allMatch(step -> recipes.find(step.recipe().id()).safePreparation()));
+        require(plan.hasMaterialChange());
+        return plan;
     }
 
     private static void require(boolean valid) {

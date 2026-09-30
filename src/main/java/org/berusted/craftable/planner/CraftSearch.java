@@ -41,6 +41,7 @@ public final class CraftSearch {
     private CraftingResultCode failure = CraftingResultCode.MISSING_INGREDIENTS;
     private List<CraftPlan.Missing> bestMissing = List.of();
     private int bestProgress = -1;
+    private int bestBindings = -1;
     private enum Phase { START, EXISTING, CLOSURE, FULL, PARTIAL, DONE }
     private Phase phase = Phase.START;
     private Entry root;
@@ -176,7 +177,7 @@ public final class CraftSearch {
             if (!frontier.isEmpty()) return Optional.empty();
             if (phase == Phase.EXISTING) {
                 failure = CraftingResultCode.MISSING_INGREDIENTS;
-                bestMissing = List.of(); bestProgress = -1;
+                bestMissing = List.of(); bestProgress = bestBindings = -1;
                 phase = Phase.CLOSURE;
             } else if (phase == Phase.FULL && failure == CraftingResultCode.MISSING_INGREDIENTS) {
                 // Structural/time truncation never produces negative evidence.
@@ -225,6 +226,11 @@ public final class CraftSearch {
         phase = next;
         partialMode = next == Phase.PARTIAL;
         existingOnly = next == Phase.EXISTING;
+        if (partialMode) {
+            // Full search stops at its first deficit. Its unfinished diagnostic
+            // cannot outrank the whole-demand accounting of the partial phase.
+            bestMissing = List.of(); bestProgress = bestBindings = -1;
+        }
         frontier.clear(); visited.clear(); completedPrefixes.clear();
         frontierBytes = memoBytes = 0;
         State start = new State(initial.copy());
@@ -237,7 +243,7 @@ public final class CraftSearch {
             State state = frontier.pop();
             frontierBytes -= state.retainedBytes();
             if (state.tasks.isEmpty()) {
-                if (state.rejected != null) continue;
+                if (state.rejected != null) { remember(state); continue; }
                 if (state.steps.isEmpty() || state.ledger.delivery(true).isEmpty()) {
                     remember(state);
                     continue;
@@ -246,6 +252,9 @@ public final class CraftSearch {
                         state.steps, state.ledger.extractions(), state.ledger.delivery(true),
                         state.ledger.delivery(false), mergeMissing(state.missing),
                         state.steps.stream().allMatch(s -> recipes.find(s.recipe().id()).safePreparation()));
+                // A reboxed existing item is not a newly craftable result.
+                // Keep this exact accounting check shared with witness replay.
+                if (!plan.hasMaterialChange()) continue;
                 CraftingResultCode invalid = validateDelivery.apply(plan);
                 if (invalid == null) return plan;
                 failure = invalid;
@@ -268,12 +277,15 @@ public final class CraftSearch {
                 state.active.remove(finish.recipe.id());
                 if (grid.missing) {
                     if (!partialMode) continue;
-                    if (grid.parent != null && state.steps.size() == grid.startSteps) {
-                        // No useful step was reached on this producer branch.
-                        // Collapse an unproductive compression/decompression
-                        // detour back to its original demand; two diamonds must
-                        // not turn a one-diamond deficit into nine diamonds.
+                    if (grid.parent != null && state.steps.size() == grid.startSteps
+                            && java.util.Arrays.stream(grid.taken).allMatch(java.util.Objects::isNull)) {
+                        // No actual input or processing seeds this producer.
+                        // Explain the parent demand instead of an arbitrary
+                        // conversion (two ingots, not nine unseeded nuggets).
+                        // A seeded incomplete producer keeps its input deficit:
+                        // four bound nuggets genuinely need five more nuggets.
                         state.ledger = grid.before.copy();
+                        state.bindings = grid.startBindings;
                         state.missing.subList(grid.startMissing, state.missing.size()).clear();
                         state.missing.add(missing(grid.parent));
                     } else {
@@ -361,6 +373,7 @@ public final class CraftSearch {
                 int considered = 0;
                 for (Entry candidate : candidates) {
                     if (state.active.contains(candidate.id())) continue;
+                    if (recipes.isExactInverse(candidate, state.grids.get(need.grid).recipe)) continue;
                     // Reachability belongs to a candidate's inputs, not merely
                     // its output (sticks reachable via planks do not seed bamboo).
                     // An unseeded, locked conversion is not a reason to reject
@@ -392,7 +405,9 @@ public final class CraftSearch {
                         missing.rejected = state.ledger.hasProtected(need.ingredient)
                                 ? CraftingResultCode.PROTECTED_INGREDIENTS : blockedReason;
                     }
-                    remember(missing);
+                    // Partial diagnostics must finish all sibling/root demands;
+                    // an intermediate failure has neither final items nor counts.
+                    if (!partialMode) remember(missing);
                     if (partialMode) branches.add(missing);
                 }
                 // Hard frontier limit bounds branch memory as well as CPU.
@@ -431,11 +446,12 @@ public final class CraftSearch {
 
     private void expandRecipe(State state, Entry recipe, String path, int depth, Need parent) {
         int id = state.nextGrid++;
-        Grid grid = new Grid(recipe.gridSize() * recipe.gridSize());
+        Grid grid = new Grid(recipe);
         grid.parent = parent;
         grid.before = state.ledger.copy();
         grid.startSteps = state.steps.size();
         grid.startMissing = state.missing.size();
+        grid.startBindings = state.bindings;
         state.grids.put(id, grid);
         state.active.add(recipe.id());
         if (parent != null) state.tasks.addFirst(new Supply(parent, id));
@@ -452,6 +468,7 @@ public final class CraftSearch {
     private void bind(State state, Need need, ResourceLedger.Taken taken) {
         state.ledger.take(taken);
         state.grids.get(need.grid).taken[need.slot] = taken;
+        state.bindings++;
     }
 
     private int estimatedMissing(Entry entry, ResourceLedger ledger) {
@@ -502,8 +519,12 @@ public final class CraftSearch {
 
     private void remember(State state) {
         int progress = state.completed * SearchBudget.MAX_STEPS + state.steps.size();
-        if (progress >= bestProgress) {
+        // Prefer real production, then actual assigned inputs. Never use the
+        // reachability closure as evidence that a candidate's materials exist.
+        // Stable ties keep the first route rather than the last visited failure.
+        if (progress > bestProgress || progress == bestProgress && state.bindings > bestBindings) {
             bestProgress = progress;
+            bestBindings = state.bindings;
             bestMissing = mergeMissing(state.missing);
             if (state.rejected != null) failure = state.rejected;
         }
@@ -532,21 +553,27 @@ public final class CraftSearch {
     private record Supply(Need need, int producer) implements Task {}
 
     private static final class Grid {
+        final Entry recipe;
         final ResourceLedger.Taken[] taken;
         boolean missing;
         Need parent;
         ResourceLedger before;
         int startSteps;
         int startMissing;
-        Grid(int size) { taken = new ResourceLedger.Taken[size]; }
+        int startBindings;
+        Grid(Entry recipe) {
+            this.recipe = recipe;
+            taken = new ResourceLedger.Taken[recipe.gridSize() * recipe.gridSize()];
+        }
         Grid copy() {
-            Grid copy = new Grid(taken.length);
+            Grid copy = new Grid(recipe);
             System.arraycopy(taken, 0, copy.taken, 0, taken.length);
             copy.missing = missing;
             copy.parent = parent;
             copy.before = before;
             copy.startSteps = startSteps;
             copy.startMissing = startMissing;
+            copy.startBindings = startBindings;
             return copy;
         }
         List<ItemStack> items() {
@@ -568,6 +595,7 @@ public final class CraftSearch {
         final List<CraftPlan.Missing> missing = new ArrayList<>();
         int nextGrid;
         int completed;
+        int bindings;
         CraftingResultCode rejected;
 
         State(ResourceLedger ledger) { this.ledger = ledger; }
@@ -588,6 +616,7 @@ public final class CraftSearch {
             copy.missing.addAll(missing);
             copy.nextGrid = nextGrid;
             copy.completed = completed;
+            copy.bindings = bindings;
             copy.rejected = rejected;
             return copy;
         }
@@ -595,7 +624,7 @@ public final class CraftSearch {
             var gridKeys = new java.util.TreeMap<Integer, Object>();
             grids.forEach((id, grid) -> gridKeys.put(id, grid.identity()));
             return List.of(current, List.copyOf(tasks), ledger.identity(), gridKeys, Set.copyOf(active),
-                    completed, steps.stream().map(s -> List.of(s.recipe().id(), s.path())).toList(), Map.copyOf(results));
+                    completed, bindings, steps.stream().map(s -> List.of(s.recipe().id(), s.path())).toList(), Map.copyOf(results));
         }
     }
 }

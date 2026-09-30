@@ -106,6 +106,131 @@ public final class M4PlanningGameTests {
     }
 
     @GameTest(templateNamespace = "minecraft", template = EMPTY)
+    public static void reversibleMetalsCannotManufactureThemselvesOrExhaustToolSearch(GameTestHelper helper) {
+        var player = player(helper);
+        try {
+            Item[] ingots = {Items.IRON_INGOT, Items.GOLD_INGOT};
+            String[] metals = {"iron", "gold"};
+            for (int i = 0; i < metals.length; i++) {
+                var same = search(player, metals[i] + "_ingot_from_nuggets", 1, false, true, new ItemStack(ingots[i]));
+                helper.assertTrue(same.plan().isEmpty(), "Ingot round trip became a craft: " + metals[i]);
+                for (boolean partial : new boolean[]{false, true}) {
+                    var tool = search(player, (i == 0 ? "iron" : "golden") + "_pickaxe", 1, partial, true,
+                            new ItemStack(ingots[i]), new ItemStack(Items.STICK, 2));
+                    helper.assertValueEqual(tool.code(), CraftingResultCode.MISSING_INGREDIENTS,
+                            "One ingot must be a shortage, not a cycle/search limit: " + tool);
+                    helper.assertTrue(tool.completeSearch(), "Shortage was not proven");
+                    helper.assertValueEqual(search(player, (i == 0 ? "iron" : "golden") + "_pickaxe", 1, partial, true,
+                            new ItemStack(ingots[i])).code(), CraftingResultCode.MISSING_INGREDIENTS, "one ingot alone");
+                }
+                var prepare = search(player, (i == 0 ? "iron" : "golden") + "_pickaxe", 1, true, true,
+                        new ItemStack(ingots[i]), new ItemStack(Items.OAK_LOG));
+                var plan = prepare.plan().orElseThrow(() -> new AssertionError(prepare));
+                helper.assertValueEqual(count(plan.primary(), Items.STICK), 4, "prepare only missing sticks");
+                Item ingot = ingots[i];
+                helper.assertFalse(plan.extractions().stream().anyMatch(e -> e.expected().is(ingot)), "partial reboxed existing ingot");
+            }
+        } finally { remove(player); }
+        helper.succeed();
+    }
+
+    @GameTest(templateNamespace = "minecraft", template = EMPTY)
+    public static void changedConversionYieldIsNotMistakenForLosslessInverse(GameTestHelper helper) {
+        var player = player(helper);
+        var manager = helper.getLevel().getRecipeManager();
+        var original = List.copyOf(manager.getRecipes());
+        try {
+            // A data pack may intentionally change the exchange rate. Only an
+            // EXACT inverse may be removed, not every ingot/nugget relationship.
+            var id = ResourceLocation.withDefaultNamespace("iron_nugget");
+            var modified = new ArrayList<net.minecraft.world.item.crafting.RecipeHolder<?>>(original);
+            modified.removeIf(holder -> holder.id().equals(id));
+            modified.add(new net.minecraft.world.item.crafting.RecipeHolder<>(id,
+                    new net.minecraft.world.item.crafting.ShapelessRecipe("", net.minecraft.world.item.crafting.CraftingBookCategory.MISC,
+                            new ItemStack(Items.IRON_NUGGET, 10), net.minecraft.core.NonNullList.of(
+                                    net.minecraft.world.item.crafting.Ingredient.EMPTY, net.minecraft.world.item.crafting.Ingredient.of(Items.IRON_INGOT)))));
+            manager.replaceRecipes(modified);
+            var result = search(player, "iron_ingot_from_nuggets", 1, false, true, new ItemStack(Items.IRON_INGOT));
+            var plan = result.plan().orElseThrow(() -> new AssertionError(result));
+            helper.assertValueEqual(count(plan.surplus(), Items.IRON_NUGGET), 1, "changed yield's genuine surplus");
+            helper.assertTrue(plan.hasMaterialChange(), "gaining conversion marked no-op");
+        } finally { manager.replaceRecipes(original); remove(player); }
+        helper.succeed();
+    }
+
+    @GameTest(templateNamespace = "minecraft", template = EMPTY)
+    public static void usefulMetalConversionsStillCombineExistingAndConvertedStock(GameTestHelper helper) {
+        var player = player(helper);
+        try {
+            for (var stock : List.of(
+                    List.of(new ItemStack(Items.IRON_NUGGET, 27), new ItemStack(Items.STICK, 2)),
+                    List.of(new ItemStack(Items.IRON_INGOT), new ItemStack(Items.IRON_NUGGET, 18), new ItemStack(Items.STICK, 2)),
+                    List.of(new ItemStack(Items.IRON_BLOCK), new ItemStack(Items.STICK, 2)))) {
+                var result = search(player, "iron_pickaxe", 1, false, true, stock.toArray(ItemStack[]::new));
+                helper.assertValueEqual(result.code(), CraftingResultCode.CREATED, "Useful conversion lost: " + result);
+            }
+            helper.assertValueEqual(search(player, "iron_nugget", 1, false, true,
+                    new ItemStack(Items.IRON_INGOT)).code(), CraftingResultCode.CREATED, "ingot to nuggets");
+            helper.assertValueEqual(search(player, "iron_ingot_from_nuggets", 1, false, true,
+                    new ItemStack(Items.IRON_NUGGET, 9)).code(), CraftingResultCode.CREATED, "nuggets to ingot");
+        } finally { remove(player); }
+        helper.succeed();
+    }
+
+    @GameTest(templateNamespace = "minecraft", template = EMPTY)
+    public static void metalDeficitsCountAllRootDemandsWithoutUnseededConversion(GameTestHelper helper) {
+        var player = player(helper);
+        try {
+            Item[] metals = {Items.IRON_INGOT, Items.GOLD_INGOT};
+            String[] targets = {"iron_pickaxe", "golden_pickaxe"};
+            for (int metal = 0; metal < metals.length; metal++) {
+                for (int available = 1; available < 3; available++) {
+                    var result = search(player, targets[metal], 1, true, true,
+                            new ItemStack(metals[metal], available), new ItemStack(Items.STICK, 2));
+                    assertDeficit(helper, result, metals[metal], 3 - available);
+                }
+                assertDeficit(helper, search(player, targets[metal], 1, true, true,
+                        new ItemStack(Items.STICK, 2)), metals[metal], 3);
+            }
+            assertDeficit(helper, search(player, "iron_pickaxe", 2, true, true,
+                    new ItemStack(Items.IRON_INGOT), new ItemStack(Items.STICK, 4)), Items.IRON_INGOT, 5);
+        } finally { remove(player); }
+        helper.succeed();
+    }
+
+    @GameTest(templateNamespace = "minecraft", template = EMPTY)
+    public static void seededIncompleteProducerReportsItsRemainingInputs(GameTestHelper helper) {
+        var player = player(helper);
+        try {
+            assertDeficit(helper, search(player, "iron_ingot_from_nuggets", 1, true, true,
+                    new ItemStack(Items.IRON_NUGGET, 4)), Items.IRON_NUGGET, 5);
+            var planks = search(player, "stick", 1, true, true, new ItemStack(Items.OAK_PLANKS));
+            helper.assertTrue(planks.missing().size() == 1 && planks.missing().getFirst().count() == 1
+                    && planks.missing().getFirst().alternatives().stream().allMatch(s -> s.is(net.minecraft.tags.ItemTags.PLANKS)),
+                    "missing one plank, with valid tag alternatives: " + planks.missing());
+            var mixed = search(player, "iron_pickaxe", 1, true, true,
+                    new ItemStack(Items.IRON_INGOT), new ItemStack(Items.IRON_NUGGET, 4), new ItemStack(Items.STICK, 2));
+            helper.assertValueEqual(mixed.missing().size(), 2, "seeded route plus remaining ingot demand: " + mixed.missing());
+            helper.assertTrue(mixed.missing().stream().anyMatch(m -> m.count() == 5
+                    && m.alternatives().stream().allMatch(s -> s.is(Items.IRON_NUGGET))), "missing five nuggets: " + mixed.missing());
+            helper.assertTrue(mixed.missing().stream().anyMatch(m -> m.count() == 1
+                    && m.alternatives().stream().allMatch(s -> s.is(Items.IRON_INGOT))), "missing one other ingot: " + mixed.missing());
+            helper.assertTrue(mixed.plan().isEmpty(), "diagnosis consumed incomplete inputs");
+        } finally { remove(player); }
+        helper.succeed();
+    }
+
+    private static void assertDeficit(GameTestHelper helper, SearchResult result, Item item, int count) {
+        helper.assertValueEqual(result.code(), CraftingResultCode.MISSING_INGREDIENTS, "deficit result: " + result);
+        helper.assertTrue(result.completeSearch() && result.plan().isEmpty(), "incomplete/no-op diagnosis: " + result);
+        helper.assertValueEqual(result.missing().size(), 1, "one deficit kind: " + result.missing());
+        var missing = result.missing().getFirst();
+        helper.assertValueEqual(missing.count(), count, "whole demand quantity: " + result.missing());
+        helper.assertTrue(!missing.alternatives().isEmpty() && missing.alternatives().stream().allMatch(s -> s.is(item)),
+                "wrong missing item: " + result.missing());
+    }
+
+    @GameTest(templateNamespace = "minecraft", template = EMPTY)
     public static void rootWorkstationAndProtectedComponentsAreHardBoundaries(GameTestHelper helper) {
         var player = player(helper);
         try {

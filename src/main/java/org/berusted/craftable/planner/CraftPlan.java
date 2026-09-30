@@ -28,6 +28,21 @@ public record CraftPlan(ResourceLocation target, int requestedBatches, int compl
 
     public boolean partial() { return completedBatches < requestedBatches; }
 
+    /** Reject identity transformations regardless of recipe IDs or source slot.
+     * Compare actual extracted counts with ALL delivered items, including
+     * surplus/remainders and components. Genuine compression is still a change.
+     * Shared by search, untrusted witness replay and the commit boundary. */
+    public boolean hasMaterialChange() {
+        var delta = new java.util.HashMap<ResourceLedger.Key, Long>();
+        for (var extraction : extractions)
+            delta.merge(ResourceLedger.Key.of(extraction.expected()), -(long) extraction.count(), Long::sum);
+        for (var stack : primary)
+            if (!stack.isEmpty()) delta.merge(ResourceLedger.Key.of(stack), (long) stack.getCount(), Long::sum);
+        for (var stack : surplus)
+            if (!stack.isEmpty()) delta.merge(ResourceLedger.Key.of(stack), (long) stack.getCount(), Long::sum);
+        return delta.values().stream().anyMatch(count -> count != 0);
+    }
+
     /** Untrusted route only: no output, count of manufactured items, world
      * coordinates or container write instruction crosses this boundary. */
     public record Witness(java.util.UUID session, long recipes, long resources, List<WitnessStep> steps) {

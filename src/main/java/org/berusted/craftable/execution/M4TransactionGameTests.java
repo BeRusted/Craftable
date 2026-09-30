@@ -54,6 +54,8 @@ public final class M4TransactionGameTests {
             helper.assertValueEqual(source.countItem(Items.DIAMOND), 3, "diamonds not restored");
             helper.assertTrue(player.getInventory().getItem(0).isEmpty(), "primary escaped rollback");
             helper.assertTrue(!drops.isEmpty() && drops.stream().allMatch(ItemEntity::isRemoved), "changed entity leaked");
+            helper.assertValueEqual(player.getStats().getValue(net.minecraft.stats.Stats.CUSTOM.get(net.minecraft.stats.Stats.INTERACT_WITH_CRAFTING_TABLE)),
+                    0, "rolled-back chain counted workbench use");
         } finally {
             NeoForge.EVENT_BUS.unregister(listener);
             drops.forEach(ItemEntity::discard);

@@ -36,8 +36,8 @@
 | --- | --- |
 | `src/test/java/org/berusted/craftable/` | 按生产包分组的 JUnit；不保留已退役协议的自循环编解码测试 |
 | `src/main/java/.../execution/M2GameTests.java`、`menu/M3GameTests.java` | 既有环境/菜单/直接合成边界 |
-| `execution/M4PlanningGameTests.java`、`M4TransactionGameTests.java`、`M4RandomGraphGameTests.java` | 递归、账本结果/容量/事务及随机图 |
-| `execution/M4DetailsGameTests.java`、`M4InteractionGameTests.java` | 详情/部分意图、令牌、完整见证与服务器失败证据 |
+| `execution/M4PlanningGameTests.java`、`M4TransactionGameTests.java`、`M4RandomGraphGameTests.java` | 递归、可逆转换剪枝/改产量反例、全需求缺口数量/有材料起点诊断、账本结果/容量/事务/回滚统计及随机图 |
+| `execution/M4DetailsGameTests.java`、`M4InteractionGameTests.java` | 详情/部分意图、令牌、完整见证/空转拒绝、服务器失败证据复用、C/详情缺口一致和失败不消费、成功操作与多批次统计 |
 | `execution/M48ContinuationGameTests.java`、`M4PreviewGameTests.java` | 同核心续算、共享闭包/证据；旧批量 facade 的基线不是现行网络入口 |
 | `recipe/M4KnowledgeGameTests.java` | 静态关系与缓存边界 |
 | `src/m3ClientTest/java/.../client/M3ClientSmoke.java` | inventory 唯一入口；历史源集名保留，非 M3 专属测试框架 |
@@ -50,9 +50,9 @@ GameTest 当前依赖 NeoForge 发现及包内测试接口，继续留在 main �
 
 ## 4. 人工边界与阶段收口
 
-- 当前唯一有效人工清单：[M4 A–L](../docs/18-m4-acceptance.md)。先 UI 四项，再做剩余单人及真实两设备项目；协议 9 两端同一 JAR。
+- 当前唯一有效人工清单：[M4 A–L](../docs/18-m4-acceptance.md)。本轮优先 B.9、B.12–13 缺口诊断，再做 UI 和其他剩余单人及真实两设备项目；协议 9 两端同一 JAR。
 - [数据包夹具](datapacks/README.md) 用于真实配方/标签重载；不自动安装到玩家存档。
 - 自动计数证明“零服务端逐目标浏览”“见证验证零完整重搜”，玩家不必靠速度猜测或构造恶意包。
 - 低配、大目录端到端、1/16/64 容器与 1/2/8 真实客户端高 RTT 矩阵属 M8 扩展观测；不能为了收口把它们标为已通过。
-- 清理批次删除七项退役 JUnit 后为 62 项；连续 C 修复增加三项显示/证据隔离及无变化不重建回归，共 65 项，GameTest 保持 90 项。数量不是覆盖率，变更后应核对实际报告而非只对总数。
+- 清理批次删除七项退役 JUnit 后为 62 项；连续 C 修复增加三项，共 65 项。可逆转换/统计修复增加五项 GameTest 达 95 项；缺口诊断修复再增加三项，共 98 项，覆盖金属/多批次缺口、有起点输入以及 C/详情失败边界。数量不是覆盖率，变更后应核对实际报告而非只对总数。
 - [当前进展与清理证据](../docs/17-m4-progress.md) 记录本轮结果；历史日志保留，不据历史通过替代新构建验收。
