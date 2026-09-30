@@ -128,7 +128,7 @@ public abstract class RecipeButtonMixin extends AbstractWidget {
                     : label);
         }
         if (lifecycle != ClientRecipeStatusStore.Lifecycle.KNOWN) ci.getReturnValue().add(Component.translatable("tooltip.craftable.pending"));
-        ci.getReturnValue().add(Component.translatable("tooltip.craftable.create_one"));
-        ci.getReturnValue().add(Component.translatable("tooltip.craftable.details"));
+        ci.getReturnValue().add(Component.translatable("tooltip.craftable.create_one",
+                org.berusted.craftable.client.CraftableKeyMappings.CREATE_ONE.getTranslatedKeyMessage()));
     }
 }

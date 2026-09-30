@@ -461,6 +461,15 @@ public final class ClientBrowsePlanner {
         resetDetails();
     }
 
+    /** Request a fresh authorization through the existing browse session.
+     * Unchanged resources renew the lease, not the graph or search budgets. */
+    public static void requestRefresh() {
+        if (menu == null) return;
+        grant = null;
+        sentAt = Long.MIN_VALUE;
+        ClientRecipeStatusStore.authorizeLocal(false);
+    }
+
     public static void recipesChanged() {
         generation = new Object(); CATALOG.clear(); input = null;
         invalidate();

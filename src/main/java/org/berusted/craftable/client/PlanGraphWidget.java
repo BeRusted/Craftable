@@ -32,10 +32,15 @@ final class PlanGraphWidget extends AbstractWidget {
     }
 
     void show(PlanView view) {
+        boolean updating = this.view != null;
+        int previousX = panX, previousY = panY, previousFocus = focusedCell;
         this.view = view;
-        collapsed.clear();
-        panX = panY = focusedCell = 0;
         layout();
+        if (updating) {
+            // Resource renewal updates the projection, not the player's view.
+            panX = previousX; panY = previousY;
+            focusedCell = Math.min(previousFocus, Math.max(0, cells.size() - 1));
+        }
     }
 
     private void layout() {
@@ -65,15 +70,7 @@ final class PlanGraphWidget extends AbstractWidget {
         for (var node : raw.values()) if (!node.reference().isEmpty() && raw.containsKey(node.reference())
                 && !node.reference().startsWith(node.path() + ".") && !node.path().startsWith(node.reference() + "."))
             aliases.put(node.path(), node.reference());
-        var identicalLeaves = new HashMap<Object, String>();
-        for (var n : raw.values()) {
-            boolean leaf = raw.keySet().stream().noneMatch(p -> parent(p).equals(n.path()));
-            if (!leaf || n.path().equals("0") || !n.made().isEmpty() || !n.recipes().isEmpty() || aliases.containsKey(n.path())) continue;
-            Object key = List.of(parent(n.path()), CraftPlan.stackKeys(n.needs().stream().map(s -> s.copyWithCount(1)).toList()),
-                    n.explanation(), n.alternatives());
-            String previous = identicalLeaves.putIfAbsent(key, n.path());
-            if (previous != null) aliases.put(n.path(), previous);
-        }
+        mergeEquivalentBranches(raw, aliases);
         var grouped = new LinkedHashMap<String, Cell>();
         for (var n : raw.values()) {
             String id = resolve(n.path(), aliases);
@@ -90,6 +87,30 @@ final class PlanGraphWidget extends AbstractWidget {
             if (!id.equals(parent) && grouped.containsKey(parent) && !grouped.get(parent).children.contains(id))
                 grouped.get(parent).children.add(id);
         }
+        // Different real materials across batches are AND inputs, not an
+        // animated OR icon. Split actual mixed leaves for display only; all
+        // variants retain authoritative paths. Operations remain executable.
+        for (var cell : List.copyOf(grouped.values())) {
+            if (!cell.children.isEmpty() || cell.alternatives || cell.needs.size() <= 1) continue;
+            if (grouped.size() + cell.needs.size() - 1 > PlanView.MAX_NODES) continue;
+            var variants = new ArrayList<String>();
+            variants.add(cell.id);
+            for (int i = 1; i < cell.needs.size(); i++) {
+                var variant = new Cell(cell.id + ":" + i);
+                variant.paths.addAll(cell.paths);
+                variant.needs.add(cell.needs.get(i).copy());
+                variant.explanation = cell.explanation;
+                variant.deviation = true;
+                grouped.put(variant.id, variant); variants.add(variant.id);
+            }
+            var first = cell.needs.getFirst();
+            cell.needs.clear(); cell.needs.add(first);
+            for (var parent : grouped.values()) if (parent.children.contains(cell.id)) {
+                int at = parent.children.indexOf(cell.id);
+                parent.children.remove(at); parent.children.addAll(at, variants);
+            }
+        }
+        collapsed.retainAll(grouped.keySet());
         int[] row = {0};
         place("0", grouped, new java.util.HashSet<>(), row);
         if (!cells.isEmpty()) {
@@ -107,7 +128,7 @@ final class PlanGraphWidget extends AbstractWidget {
         var cell = grouped.get(id);
         if (cell == null) return row[0] * 40;
         if (!seen.add(id)) return cell.y;
-        int depth = id.split("\\.").length - 1;
+        int depth = cell.paths.getFirst().split("\\.").length - 1;
         cell.x = width - 42 - depth * 64;
         var visibleChildren = collapsed.contains(id) ? List.<String>of() : cell.children;
         if (visibleChildren.isEmpty()) cell.y = row[0]++ * 40;
@@ -127,19 +148,10 @@ final class PlanGraphWidget extends AbstractWidget {
         var stone = net.minecraft.resources.ResourceLocation.withDefaultNamespace("textures/block/stone.png");
         for (int x = getX(); x < getX() + width; x += 16) for (int y = getY(); y < getY() + height; y += 16)
             g.blit(stone, x, y, 0, 0, 16, 16, 16, 16);
-        for (var cell : cells) if (!collapsed.contains(cell.id)) for (String childId : cell.children) {
-            var child = byId.get(childId);
-            if (child == null) continue;
-            int x1 = x(child) + 13, y1 = y(child) + 13, x2 = x(cell) + 13, y2 = y(cell) + 13;
-            int bend = (x1 + x2) / 2;
-            // Vanilla advancement connectivity: black outline, white core.
-            g.fill(x1, y1 - 1, bend + 2, y1 + 2, 0xFF000000);
-            g.fill(bend - 1, Math.min(y1, y2) - 1, bend + 2, Math.max(y1, y2) + 2, 0xFF000000);
-            g.fill(bend - 1, y2 - 1, x2, y2 + 2, 0xFF000000);
-            g.hLine(x1, bend, y1, 0xFFFFFFFF);
-            g.vLine(bend, Math.min(y1, y2), Math.max(y1, y2), 0xFFFFFFFF);
-            g.hLine(bend, x2, y2, 0xFFFFFFFF);
-        }
+        // As in vanilla advancements, finish every outline before drawing any
+        // white core. Per-edge interleaving cuts previously drawn junctions.
+        drawConnections(g, true);
+        drawConnections(g, false);
         Cell hovered = null;
         for (int i = 0; i < cells.size(); i++) {
             var c = cells.get(i);
@@ -159,13 +171,32 @@ final class PlanGraphWidget extends AbstractWidget {
             g.renderItemDecorations(font, icon, x + 5, y + 5);
             g.pose().pushPose();
             g.pose().translate(0, 0, 250);
-            if (c.recipes.size() > 1 || c.needs.size() > 1 && !c.alternatives)
-                g.drawString(font, "!", x + 22, y - 3, 0xFFFFFF55);
-            if (collapsed.contains(c.id)) g.drawString(font, "+", x - 7, y + 6, 0xFFFFFFFF);
+            if (c.deviation || c.recipes.size() > 1 || c.needs.size() > 1 && !c.alternatives)
+                g.drawString(font, "!", x + 22, y - 3, 0xFFFFFF55, false);
+            if (collapsed.contains(c.id)) g.drawString(font, "+", x - 7, y + 6, 0xFFFFFFFF, false);
             g.pose().popPose();
         }
         g.disableScissor();
         if (hovered != null) g.renderComponentTooltip(font, tooltip(hovered), mouseX, mouseY);
+    }
+
+    private void drawConnections(GuiGraphics g, boolean outline) {
+        for (var cell : cells) if (!collapsed.contains(cell.id)) for (String childId : cell.children) {
+            var child = byId.get(childId);
+            if (child == null) continue;
+            int x1 = x(child) + 13, y1 = y(child) + 13, x2 = x(cell) + 13, y2 = y(cell) + 13;
+            int bend = (x1 + x2) / 2;
+            if (outline) {
+                g.fill(x1, y1 - 1, bend + 2, y1 + 2, 0xFF000000);
+                g.fill(bend - 1, Math.min(y1, y2) - 1, bend + 2, Math.max(y1, y2) + 2, 0xFF000000);
+                g.fill(bend - 1, y2 - 1, x2 + 1, y2 + 2, 0xFF000000);
+            } else {
+                g.hLine(x1, bend, y1, 0xFFFFFFFF);
+                // vLine excludes its endpoints; both horizontal cores include them.
+                g.vLine(bend, Math.min(y1, y2), Math.max(y1, y2), 0xFFFFFFFF);
+                g.hLine(bend, x2, y2, 0xFFFFFFFF);
+            }
+        }
     }
 
     @Override public void onClick(double mouseX, double mouseY) {
@@ -221,31 +252,98 @@ final class PlanGraphWidget extends AbstractWidget {
     private List<Component> tooltip(Cell cell) {
         var lines = new ArrayList<Component>();
         lines.add(icon(cell).getHoverName());
+        if (cell.deviation) lines.add(Component.translatable("screen.craftable.plan.additional_material"));
         if (cell.explanation) lines.add(Component.translatable("screen.craftable.plan.explanation_node"));
         else if (cell.made.isEmpty() && cell.recipes.isEmpty())
             lines.add(Component.translatable("screen.craftable.plan.existing"));
         if (cell.alternatives) lines.add(Component.translatable("screen.craftable.plan.or"));
         for (var stack : cell.needs) lines.add(Component.translatable("screen.craftable.plan.need", stack.getCount(), stack.getHoverName()));
         for (var stack : cell.made) lines.add(Component.translatable("screen.craftable.plan.made", stack.getCount(), stack.getHoverName()));
-        for (String recipe : cell.recipes) lines.add(Component.literal(recipe));
-        // Exact per-step material/remaining-item details remain accessible
-        // without spending a permanent toolbar row on an extra steps page.
+        // Summarize the selected real operations once, not once per batch.
+        // Exact components remain distinct; input/output/remainder roles never
+        // cancel each other. This presentation does not modify the reviewed plan.
+        var inputs = new ArrayList<ItemStack>();
+        var outputs = new ArrayList<ItemStack>();
+        var remainders = new ArrayList<ItemStack>();
         for (var op : view.operations()) if (cell.paths.contains(op.path())) {
-            lines.add(Component.translatable("screen.craftable.plan.outputs"));
-            lines.add(Component.translatable("screen.craftable.plan.item_count", op.output().getCount(), op.output().getHoverName()));
-            for (var input : op.inputs()) if (!input.isEmpty())
-                lines.add(Component.translatable("screen.craftable.plan.need", input.getCount(), input.getHoverName()));
-            for (var remainder : op.remainders()) if (!remainder.isEmpty())
-                lines.add(Component.translatable("screen.craftable.plan.remainders").append(" ").append(remainder.getHoverName()));
-            if (lines.size() > 40) { lines.add(Component.literal("…")); break; }
+            merge(outputs, op.output());
+            op.inputs().stream().filter(s -> !s.isEmpty()).forEach(s -> merge(inputs, s));
+            op.remainders().stream().filter(s -> !s.isEmpty()).forEach(s -> merge(remainders, s));
         }
+        addAmounts(lines, "recipe_inputs", inputs);
+        addAmounts(lines, "recipe_outputs", outputs);
+        addAmounts(lines, "remainders", remainders);
         if (cell.paths.size() > 1) lines.add(Component.translatable("screen.craftable.plan.shared", cell.paths.size()));
+        if (lines.size() > 40) {
+            lines.subList(40, lines.size()).clear();
+            lines.add(Component.literal("…"));
+        }
         return lines;
+    }
+
+    private static void addAmounts(List<Component> lines, String title, List<ItemStack> stacks) {
+        if (stacks.isEmpty()) return;
+        lines.add(Component.translatable("screen.craftable.plan." + title));
+        for (var stack : stacks) lines.add(Component.translatable("screen.craftable.plan.item_count",
+                stack.getCount(), stack.getHoverName()));
+    }
+
+    private static void mergeEquivalentBranches(Map<String, PlanView.Node> raw, Map<String, String> aliases) {
+        var children = new HashMap<String, List<String>>();
+        raw.keySet().forEach(p -> children.computeIfAbsent(parent(p), ignored -> new ArrayList<>()).add(p));
+        var shapes = new HashMap<String, Object>();
+        // Same-batch references are a DAG, not independent production. Exclude
+        // their source AND destination subtrees from structural display merging.
+        var referenced = new java.util.HashSet<>(aliases.keySet());
+        referenced.addAll(aliases.values());
+        shape("0", raw, children, referenced, shapes);
+        var first = new HashMap<Object, String>();
+        for (String path : raw.keySet()) {
+            Object shape = shapes.get(path);
+            if (path.equals("0") || shape == null || aliases.containsKey(path)) continue;
+            String previous = first.putIfAbsent(List.of(parent(path), shape), path);
+            if (previous != null) aliasTree(path, previous, children, aliases);
+        }
+    }
+
+    private static Object shape(String path, Map<String, PlanView.Node> raw, Map<String, List<String>> children,
+            java.util.Set<String> referenced, Map<String, Object> shapes) {
+        var node = raw.get(path);
+        if (node == null) return null;
+        boolean safe = !referenced.contains(path) && !node.alternatives();
+        var childShapes = new ArrayList<Object>();
+        for (String child : children.getOrDefault(path, List.of())) {
+            Object childShape = shape(child, raw, children, referenced, shapes);
+            safe &= childShape != null;
+            if (childShape != null) childShapes.add(List.of(child.substring(path.length()), childShape));
+        }
+        if (!safe) return null;
+        Object result = List.of(CraftPlan.stackKeys(node.needs().stream().map(s -> s.copyWithCount(1)).toList()),
+                CraftPlan.stackKeys(node.made().stream().map(s -> s.copyWithCount(1)).toList()),
+                node.recipes(), node.explanation(), childShapes);
+        shapes.put(path, result);
+        return result;
+    }
+
+    private static void aliasTree(String path, String target, Map<String, List<String>> children, Map<String, String> aliases) {
+        // Only display aliases: keep every real demand path and sum its counts
+        // below. Choosing a merged node still constrains all represented paths.
+        aliases.put(path, target);
+        for (String child : children.getOrDefault(path, List.of()))
+            aliasTree(child, target + child.substring(path.length()), children, aliases);
     }
 
     private int x(Cell c) { return getX() + c.x + panX; }
     private int y(Cell c) { return getY() + c.y + panY; }
-    private static ItemStack icon(Cell c) { return !c.needs.isEmpty() ? c.needs.getFirst() : c.made.isEmpty() ? ItemStack.EMPTY : c.made.getFirst(); }
+    private static ItemStack icon(Cell c) {
+        var values = !c.needs.isEmpty() ? c.needs : c.made;
+        if (values.isEmpty()) return ItemStack.EMPTY;
+        // A mixed intermediate remains one aggregate production node. Its
+        // badge/tooltip explains the variants; the count must include all of
+        // them, not just the first wood type represented by the display icon.
+        return !c.alternatives && values.size() > 1
+                ? values.getFirst().copyWithCount(values.stream().mapToInt(ItemStack::getCount).sum()) : values.getFirst();
+    }
     private static String parent(String path) { int dot = path.lastIndexOf('.'); return dot < 0 ? "" : path.substring(0, dot); }
     private static String resolve(String path, Map<String, String> aliases) {
         for (int i = 0; i < PlanView.MAX_NODES && aliases.containsKey(path); i++) path = aliases.get(path);
@@ -261,7 +359,7 @@ final class PlanGraphWidget extends AbstractWidget {
         final String id;
         final List<String> paths = new ArrayList<>(), recipes = new ArrayList<>(), children = new ArrayList<>();
         final List<ItemStack> needs = new ArrayList<>(), made = new ArrayList<>();
-        boolean explanation, alternatives;
+        boolean explanation, alternatives, deviation;
         int x, y;
         Cell(String id) { this.id = id; }
     }

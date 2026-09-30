@@ -53,6 +53,7 @@ public final class M4ClientSmoke {
     private static long serverDetails;
     private static long witnessBefore, fullSearchesBefore;
     private static int reviewMismatchPhase;
+    private static int partialUiPhase, refreshedPanY;
     private static final java.util.List<Long> timings = new java.util.ArrayList<>();
     private static final BlockPos CHEST = new BlockPos(1, -60, 1);
     private static final ResourceLocation PICK = ResourceLocation.withDefaultNamespace("diamond_pickaxe");
@@ -160,6 +161,7 @@ public final class M4ClientSmoke {
 
     private static void detailsAndCrafting(Minecraft mc) throws Exception {
             if (stage == 4 && ready()) {
+                M4GraphPresentationScenario.verify();
                 var draft = draft();
                 require(draft.view().code() == CraftingResultCode.CREATED, "Full preview not craftable: " + draft.view().code());
                 require(draft.view().operations().size() == 3, "Preview lost recursive steps");
@@ -181,6 +183,12 @@ public final class M4ClientSmoke {
                 var create = (Button) field(overlay(), "create");
                 var slider = (net.minecraft.client.gui.components.AbstractWidget) field(overlay(), "slider");
                 require(create.getY() == slider.getY(), "Bottom actions not on one row");
+                require(create.getMessage().getString().equals(net.minecraft.network.chat.Component.translatable("screen.craftable.plan.create").getString()),
+                        "Primary action no longer has one stable label");
+                require(allButtons(overlay()).stream().filter(b -> b.visible && b.getY() == create.getY()).count() == 1,
+                        "Old partial/refresh actions remain on bottom row");
+                var refresh = (Button) field(overlay(), "refresh");
+                require(refresh.getWidth() == 20 && refresh.getY() < create.getY(), "Refresh is still a full-size primary action");
                 require(allButtons(overlay()).stream().noneMatch(b -> b.visible && b.getY() < 34), "Old top navigation remains");
                 click(widget.getX() + (int) field(cell, "x") + (int) field(graph, "panX") + 8,
                         widget.getY() + (int) field(cell, "y") + (int) field(graph, "panY") + 8);
@@ -259,23 +267,46 @@ public final class M4ClientSmoke {
                 CraftingPlanOverlay.open(mc.screen, PICK, false);
                 next();
             } else if (stage == 10 && ready()) {
+                if (partialUiPhase == 0) {
+                    require(((CraftRequest) field(overlay(), "intent")).partial(), "Partial frontier was not selected for read-only display");
+                    var graph = (PlanGraphWidget) field(overlay(), "graph");
+                    graph.mouseScrolled(graph.getX() + 2, graph.getY() + 2, 0, 1);
+                    refreshedPanY = (int) field(graph, "panY");
+                    mc.getSingleplayerServer().execute(() -> {
+                        var chest = (ChestBlockEntity) serverPlayer().serverLevel().getBlockEntity(CHEST);
+                        chest.setItem(1, new ItemStack(Items.DIAMOND, 3)); chest.setChanged();
+                    });
+                    partialUiPhase = 1;
+                    return;
+                }
+                if (partialUiPhase == 1) {
+                    if (draft().view().code() != CraftingResultCode.CREATED) return;
+                    require(!((CraftRequest) field(overlay(), "intent")).partial(), "Automatic full refresh retained partial intent");
+                    require((int) field(field(overlay(), "graph"), "panY") == refreshedPanY, "Automatic refresh reset graph position");
+                    require(mc.player.getInventory().countItem(Items.DIAMOND_PICKAXE) == 0, "Auto-refresh crafted without a click");
+                    mc.getSingleplayerServer().execute(() -> {
+                        var chest = (ChestBlockEntity) serverPlayer().serverLevel().getBlockEntity(CHEST);
+                        chest.setItem(1, ItemStack.EMPTY); chest.setChanged();
+                    });
+                    partialUiPhase = 2;
+                    return;
+                }
+                if (draft().view().code() != CraftingResultCode.PARTIAL_CREATED) return;
                 require(draft().view().code() == CraftingResultCode.PARTIAL_CREATED, "Missing diamond not shown as partial");
                 shot("partial-graph");
-                var partial = (Button) field(overlay(), "partial");
-                require(partial.active, "Partial review disabled");
-                click(partial.getX() + 5, partial.getY() + 5);
+                require(((Button) field(overlay(), "create")).active, "Displayed partial action disabled");
                 next();
             } else if (stage == 11 && ready()) {
                 require(((CraftRequest) field(overlay(), "intent")).partial(), "Review did not select partial intent");
                 require(mc.player.getInventory().countItem(Items.STICK) == 0, "First partial click consumed before review");
-                var partial = (Button) field(overlay(), "partial");
-                require(partial.active, "Reviewed partial confirm disabled");
-                click(partial.getX() + 5, partial.getY() + 5);
+                var create = (Button) field(overlay(), "create");
+                require(create.active, "Displayed partial craft disabled");
+                click(create.getX() + 5, create.getY() + 5);
                 next();
             } else if (stage == 12 && age > 30 && ready()) {
                 require(mc.player.getInventory().countItem(Items.STICK) == 4, "Partial did not deliver one whole stick batch");
                 require(mc.player.getInventory().countItem(Items.DIAMOND_PICKAXE) == 0, "Partial fabricated root");
-                require(!((Button) field(overlay(), "partial")).active, "Existing frontier allowed redundant partial");
+                require(!((Button) field(overlay(), "create")).active, "Existing frontier allowed redundant partial");
                 shot("partial-completed");
                 key(256, 0);
                 configured = false;
@@ -298,10 +329,30 @@ public final class M4ClientSmoke {
                 require(slider.active, "Known MAX did not enable slider");
                 click(slider.getX() + slider.getWidth() - 4, slider.getY() + 10);
                 next();
-            } else if (stage == 15 && ready()) {
+            } else if (stage == 15 && age > 5 && ready()) {
                 require(((CraftRequest) field(overlay(), "intent")).batches() == 6, "Slider did not choose six batches");
                 require(draft().view().code() == CraftingResultCode.CREATED, "Mixed MAX is not executable");
                 require((boolean) field(overlay(), "routeChanged"), "Mixed route warning missing");
+                var cells = (List<?>) field(field(overlay(), "graph"), "cells");
+                var materialIds = new java.util.HashSet<String>();
+                boolean deviation = false;
+                for (var cell : cells) {
+                    var needs = (List<ItemStack>) field(cell, "needs");
+                    if (needs.stream().anyMatch(s -> s.is(Items.BIRCH_LOG) || s.is(Items.OAK_LOG))) {
+                        require(needs.size() == 1, "Mixed actual materials still hidden behind one icon");
+                        materialIds.add((String) field(cell, "id"));
+                        deviation |= (boolean) field(cell, "deviation");
+                    }
+                }
+                require(materialIds.size() >= 2 && deviation, "Mixed graph missing oak/birch branches or deviation badge");
+                boolean connected = false;
+                for (var cell : cells) if (((List<?>) field(cell, "children")).containsAll(materialIds)) {
+                    connected = true;
+                    var icon = PlanGraphWidget.class.getDeclaredMethod("icon", cell.getClass());
+                    icon.setAccessible(true);
+                    require(((ItemStack) icon.invoke(null, cell)).getCount() == 12, "Mixed plank icon hides another material's count");
+                }
+                require(connected, "Mixed inputs not connected to shared production node");
                 shot("mixed-graph");
                 var create = (Button) field(overlay(), "create");
                 click(create.getX() + 5, create.getY() + 5);
@@ -360,6 +411,8 @@ public final class M4ClientSmoke {
             } else if (stage == 23) {
                 if (previewStart == 0 && ready()) {
                     pressButton(net.minecraft.network.chat.Component.translatable("screen.craftable.plan.refresh").getString());
+                    require(!((Button) field(overlay(), "refresh")).active, "Refresh allowed duplicate clicks while pending");
+                    require((boolean) field(field(overlay(), "refresh"), "busy"), "Refresh has no pending visual state");
                     previewStart = System.nanoTime();
                 } else if (previewStart != 0 && draft() != null && !(boolean) field(overlay(), "dirty")) {
                     timings.add(System.nanoTime() - previewStart); previewStart = 0;

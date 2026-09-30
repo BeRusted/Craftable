@@ -24,7 +24,7 @@
 | unit | `cleanTest test` | 模式/状态、手势、输入边界、预算、网络帧、快照接收/传输策略、知识文件 | 真实菜单渲染、世界事务、局域网 |
 | server | `runGameTestServer` | 环境/单步/递归/余料/回滚、见证攻击和差分、身份/续算、随机图、缓存 | 客户端帧、多设备网络延迟 |
 | inventory | `runClient -Pm3Smoke` | 原版配方书/筛选/C、实体工作台、切分类、模式和网格/光标返还、原版药水效果 | 玩家全部装备操作及真实两机体验 |
-| planning | `runClient -Pm4Smoke` | 静态目录、筛选复用/调度、Shift+C 候选/数量/MAX/收支、见证确认、部分、GUI/语言 | 所有模组目录、低配/多人高 RTT 的普遍性能保证 |
+| planning | `runClient -Pm4Smoke` | 静态目录、筛选复用/调度、Shift+C 单一操作/小刷新、自动资源更新/平移保持、混合材料分支、候选/数量/MAX/收支、见证确认、部分、GUI/语言 | 所有模组目录、低配/多人高 RTT 的普遍性能保证 |
 | knowledge | 连续两次 `runServer -Pm47Smoke` | 同一隔离存档跨进程缓存加载、真实 reload、专服无客户端类污染 | 首次无缓存冷启动（已有缓存时）、不同硬件/I/O 故障全集 |
 | baseline | `cleanTest test runGameTestServer build` | 无图形常规回归及 JAR | 人工验收完成 |
 
@@ -44,13 +44,14 @@
 | `client/M4ClientSmoke.java` | planning 唯一入口：准备/浏览、详情/合成、生命周期/展示三个阶段方法 |
 | `client/M4BrowsingScenario.java`、`M48SchedulingProbe.java` | 由上述入口驱动的场景/调度观察；前者不新增事件订阅或独立运行开关 |
 | `client/M4RepeatCraftScenario.java` | inventory 入口内的四次实际 C 手势，覆盖开/关筛选、显示/列表/页码/会话稳定及权威资源版本推进 |
+| `client/M4GraphPresentationScenario.java` | planning 入口内的只读图投影夹具：多批次收支/返还物汇总、同级子树数量与全部选择路径、不同材料/组件/配方/OR 不误合并、共享批次引用不重复生产；不新增测试入口 |
 | `recipe/M48ClientKnowledgeProbe.java`、`M47ServerSmoke.java` | 客户端目录取证 / knowledge 专服入口 |
 
 GameTest 当前依赖 NeoForge 发现及包内测试接口，继续留在 main 源集；开发客户端夹具不打入 JAR。不能因“所有测试放一起”而暴露核心私有接口或改变发现方式。
 
 ## 4. 人工边界与阶段收口
 
-- 当前唯一有效人工清单：[M4 A–L](../docs/18-m4-acceptance.md)。本轮优先 B.9、B.12–13 缺口诊断，再做 UI 和其他剩余单人及真实两设备项目；协议 9 两端同一 JAR。
+- 当前唯一有效人工清单：[M4 A–L](../docs/18-m4-acceptance.md)。本轮优先 C.13–14、D.7 刷新箭头/连线、汇总 Tooltip 与等价分支合并，兼顾 C.9–12、D.2 原有 UI/自动刷新/混合材料回归；协议 9 两端同一 JAR。
 - [数据包夹具](datapacks/README.md) 用于真实配方/标签重载；不自动安装到玩家存档。
 - 自动计数证明“零服务端逐目标浏览”“见证验证零完整重搜”，玩家不必靠速度猜测或构造恶意包。
 - 低配、大目录端到端、1/16/64 容器与 1/2/8 真实客户端高 RTT 矩阵属 M8 扩展观测；不能为了收口把它们标为已通过。

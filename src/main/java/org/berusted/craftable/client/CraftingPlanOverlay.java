@@ -68,7 +68,9 @@ public final class CraftingPlanOverlay extends Screen {
     private boolean routeChanged;
     private PlanGraphWidget graph;
     private CountSlider slider;
-    private Button create, partial;
+    private Button create;
+    private RefreshButton refresh;
+    private PlanView displayedView;
     private final List<Component> rows = new ArrayList<>();
     private final List<net.minecraft.util.FormattedCharSequence> wrappedRows = new ArrayList<>();
     private Component notice = Component.empty();
@@ -108,17 +110,13 @@ public final class CraftingPlanOverlay extends Screen {
     @Override protected void init() {
         clearWidgets();
         int available = Math.max(180, width - 28);
-        int sliderWidth = available * 35 / 100;
-        int third = (available - sliderWidth - 12) / 3;
+        int sliderWidth = available * 65 / 100;
         graph = addRenderableWidget(new PlanGraphWidget(14, 14, available, Math.max(30, height - 76), this::choose));
-        if (draft != null) graph.show(draft.view());
+        if (displayedView != null) graph.show(displayedView);
         graph.visible = pane == Pane.GRAPH;
         slider = addRenderableWidget(new CountSlider(14, height - 34, sliderWidth));
-        create = button(18 + sliderWidth, height - 34, third, text("create"), () -> act(false));
-        partial = button(22 + sliderWidth + third, height - 34, third, text("partial"), () -> act(true));
-        button(26 + sliderWidth + third * 2, height - 34, third, text("refresh"), () -> {
-            fallbackUsed = false; change(intent, true);
-        });
+        create = button(18 + sliderWidth, height - 34, available - sliderWidth - 4, text("create"), () -> act(intent.partial()));
+        refresh = addRenderableWidget(new RefreshButton(width - 38, height - 86));
         // The chooser is one visual recipe card. Candidate replies update it
         // in place, never replace focused widgets or flash a list of buttons.
         int cx = width / 2, cy = Math.max(24, (height - 76) / 2 - 38);
@@ -294,7 +292,7 @@ public final class CraftingPlanOverlay extends Screen {
             maximum = null; candidateStates.clear();
             if (pending != Work.CONFIRM && pending != Work.AUTHORIZE) {
                 pending = null; inFlight = -1;
-                change(intent, true);
+                change(intent.withPartial(false), true);
             }
         }
         if (pending != null) {
@@ -369,9 +367,27 @@ public final class CraftingPlanOverlay extends Screen {
             return;
         }
         if (code == CraftingResultCode.REQUEST_THROTTLED) { self.dirty = true; return; }
+        // Show the executable partial frontier directly. This is read-only:
+        // only an explicit click authorizes the displayed intent server-side.
+        // A complete result switches back to full intent to retain witness
+        // validation; ordinary C outside this overlay never falls back.
+        if (work != Work.AUTHORIZE && work != Work.CANDIDATE && self.pane != Pane.CHOICES
+                && (code == CraftingResultCode.CREATED || code == CraftingResultCode.PARTIAL_CREATED)) {
+            boolean partial = code == CraftingResultCode.PARTIAL_CREATED
+                    && self.intent.policy() != CraftRequest.PartialPolicy.NEVER;
+            if (self.intent.partial() != partial) {
+                // The single-target fallback may need one read-only intent
+                // normalization (full -> partial or partial -> full). Keep
+                // the explicit fallback usable without catalog-wide polling.
+                if (work == Work.FALLBACK) self.fallbackUsed = false;
+                self.change(self.intent.withPartial(partial), false);
+                return;
+            }
+        }
         boolean sameReview = work == Work.AUTHORIZE && self.reviewedIdentity != null
                 && self.reviewedIdentity.equals(payload.draft().view().reviewIdentity());
         self.draft = payload.draft();
+        self.displayedView = self.draft.view();
         if (work != Work.AUTHORIZE) self.submittedWitness = null;
         self.localDraft = local;
         var route = payload.draft().view().operations().stream().map(o -> (Object) List.of(o.path(), o.recipe())).distinct().toList();
@@ -434,13 +450,15 @@ public final class CraftingPlanOverlay extends Screen {
                 && (pending == null || pending == Work.MAXIMUM) && pane != Pane.CHOICES;
         boolean token = ready && (localDraft && ClientBrowsePlanner.ready()
                 || !draft.token().equals(CraftingDetailPayloads.NO_TOKEN));
-        create.active = ready && draft.view().code() == CraftingResultCode.CREATED
-                && (intent.partial() || token);
-        partial.active = ready && intent.policy() != CraftRequest.PartialPolicy.NEVER
-                && (!intent.partial() || token)
-                && (draft.view().code() == CraftingResultCode.CREATED || draft.view().code() == CraftingResultCode.PARTIAL_CREATED);
-        create.setMessage(text(intent.partial() ? "review_full" : "confirm_full"));
-        partial.setMessage(text(intent.partial() ? "confirm_partial" : "review_partial"));
+        create.active = token && (draft.view().code() == CraftingResultCode.CREATED
+                || intent.partial() && intent.policy() != CraftRequest.PartialPolicy.NEVER
+                    && draft.view().code() == CraftingResultCode.PARTIAL_CREATED);
+        create.setTooltip(draft != null && draft.view().code() == CraftingResultCode.PARTIAL_CREATED
+                ? net.minecraft.client.gui.components.Tooltip.create(text("partial_delivery", items(draft.view().primary()))) : null);
+        refresh.visible = pane == Pane.GRAPH;
+        refresh.busy = dirty || pending != null && pending != Work.MAXIMUM && pending != Work.CANDIDATE
+                || !ClientBrowsePlanner.ready();
+        refresh.active = !refresh.busy && pending != Work.MAXIMUM;
         slider.active = pane != Pane.CHOICES && maximum != null && maximum.lowerBound() > 1 && pending != Work.CONFIRM;
         graph.visible = pane == Pane.GRAPH;
         for (var button : List.of(previousChoice, nextChoice, applyChoice, automaticChoice)) button.visible = pane == Pane.CHOICES;
@@ -486,7 +504,7 @@ public final class CraftingPlanOverlay extends Screen {
 
     @Override public void render(GuiGraphics g, int mx, int my, float partialTick) {
         super.render(g, mx, my, partialTick);
-        if (pane == Pane.GRAPH && draft != null && draft.view().workbench()) {
+        if (pane == Pane.GRAPH && displayedView != null && displayedView.workbench()) {
             g.renderItem(new ItemStack(Items.CRAFTING_TABLE), 22, 22);
             if (mx >= 18 && mx < 42 && my >= 18 && my < 42)
                 g.renderTooltip(font, new ItemStack(Items.CRAFTING_TABLE), mx, my);
@@ -501,21 +519,25 @@ public final class CraftingPlanOverlay extends Screen {
             g.disableScissor();
         }
         if (pane == Pane.CHOICES) renderChoice(g, mx, my);
-        if (draft != null && pane != Pane.CHOICES) {
-            var cost = text("cost_summary", items(draft.view().consumed()));
+        if (displayedView != null && pane != Pane.CHOICES) {
+            var cost = text("cost_summary", items(displayedView.consumed()));
             g.drawString(font, font.substrByWidth(cost, width - 52).getString(), 16, height - 47, 0xFF404040, false);
             if (mx >= 14 && mx < width - 34 && my >= height - 49 && my < height - 36)
                 g.renderComponentTooltip(font, rows, mx, my);
         }
         if (routeChanged) {
-            g.drawString(font, "!", width - 26, height - 47, 0xFFFFAA00);
+            g.drawString(font, "!", width - 26, height - 47, 0xFFFFAA00, false);
             if (mx >= width - 32 && mx < width - 12 && my >= height - 49 && my < height - 36)
                 g.renderComponentTooltip(font, List.of(text("mixed_warning")), mx, my);
         }
         // Normal success/review instructions do not occupy the canvas. Keep
         // actual failures visible; absence of a token never looks actionable.
         Component status = notice;
-        if (draft == null) status = pending == Work.CONFIRM ? text("waiting") : Component.literal("…");
+        if (draft == null) {
+            if (pending == Work.CONFIRM) status = text("waiting");
+        }
+        else if (draft.view().code() == CraftingResultCode.PARTIAL_CREATED)
+            status = text("partial_delivery", items(draft.view().primary()));
         else if (draft.view().code() != CraftingResultCode.CREATED && draft.view().code() != CraftingResultCode.PARTIAL_CREATED)
             status = Component.translatable("reason.craftable." + draft.view().code().name().toLowerCase(java.util.Locale.ROOT));
         if (!status.getString().isEmpty()) {
@@ -573,11 +595,60 @@ public final class CraftingPlanOverlay extends Screen {
         g.drawString(font, label, centerX - font.width(label) / 2, y, 0xFF404040, false);
     }
 
+    /** Small refresh affordance on the canvas, not a competing primary action.
+     * The glyph is line geometry because vanilla fonts need not contain ↻. */
+    private final class RefreshButton extends Button {
+        boolean busy;
+        RefreshButton(int x, int y) {
+            super(x, y, 20, 20, text("refresh"), b -> {
+                fallbackUsed = false;
+                notice = Component.empty();
+                ClientBrowsePlanner.requestRefresh();
+                change(intent.withPartial(false), true);
+            }, DEFAULT_NARRATION);
+            setTooltip(net.minecraft.client.gui.components.Tooltip.create(text("refresh")));
+        }
+        @Override protected void renderWidget(GuiGraphics g, int mx, int my, float partialTick) {
+            // Vanilla button skin with a single unshadowed foreground glyph.
+            var sprite = ResourceLocation.withDefaultNamespace(!active ? "widget/button_disabled"
+                    : isHoveredOrFocused() ? "widget/button_highlighted" : "widget/button");
+            g.blitSprite(sprite, getX(), getY(), width, height);
+            g.pose().pushPose();
+            g.pose().translate(getX() + 10, getY() + 10, 250);
+            if (busy) g.pose().mulPose(com.mojang.math.Axis.ZP.rotationDegrees((System.nanoTime() / 4_000_000L) % 360));
+            int color = active ? 0xFFFFFFFF : 0xFFA0A0A0;
+            // Rounded, open clockwise arc, not a square. A broad downward
+            // arrowhead makes the direction legible even at GUI scale 1.
+            g.hLine(-2, 2, -6, color); g.hLine(-4, -3, -5, color);
+            g.hLine(3, 4, -5, color); g.hLine(-5, -4, -4, color);
+            g.hLine(4, 5, -4, color); g.hLine(-6, -5, -3, color);
+            g.vLine(-6, -3, 3, color); g.hLine(-6, -5, 3, color);
+            g.hLine(-5, -4, 4, color); g.hLine(-4, -3, 5, color);
+            g.hLine(-2, 2, 6, color); g.hLine(3, 4, 5, color);
+            g.hLine(4, 5, 4, color);
+            g.fill(5, -4, 7, -1, color);
+            g.hLine(3, 8, -2, color); g.hLine(4, 7, -1, color);
+            g.hLine(5, 6, 0, color);
+            g.pose().popPose();
+        }
+    }
+
     @Override public boolean mouseScrolled(double x, double y, double dx, double dy) {
         if (pane == Pane.COSTS) {
             scroll = Math.max(0, Math.min(Math.max(0, wrappedRows.size() * 12 - (height - 82)), scroll - (int) (dy * 24))); return true;
         }
         return super.mouseScrolled(x, y, dx, dy);
+    }
+
+    @Override public boolean mouseClicked(double x, double y, int button) {
+        // Floating controls must win hit-testing over the canvas beneath.
+        // Consume the reserved area even while disabled, never select a node
+        // or leak an input through to the underlying inventory.
+        if (refresh != null && refresh.visible && refresh.isMouseOver(x, y)) {
+            if (refresh.mouseClicked(x, y, button)) setFocused(refresh);
+            return true;
+        }
+        return super.mouseClicked(x, y, button);
     }
 
     @Override public boolean keyPressed(int key, int scan, int modifiers) {
