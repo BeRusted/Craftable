@@ -43,8 +43,10 @@ public final class M3ClientSmoke {
     private static long quietSequence;
     private static long previewStart;
     private static final M4RepeatCraftScenario repeatCraft = new M4RepeatCraftScenario();
+    private static final M4MenuMoveScenario menuMoves = new M4MenuMoveScenario();
     private static boolean wideEffectsRendered, compactEffectsRendered;
     private static int savedScale = -1;
+    private static boolean savedPauseOnLostFocus;
     private static final java.util.List<Long> previewSamples = new java.util.ArrayList<>();
     private static final BlockPos TABLE = new BlockPos(2, -60, 0);
     private static final BlockPos CHEST = new BlockPos(1, -60, 1);
@@ -58,6 +60,10 @@ public final class M3ClientSmoke {
             if (!started) {
                 if (!(mc.screen instanceof TitleScreen)) return;
                 started = true;
+                // A background test window must not pause the integrated
+                // server while the client keeps counting assertion ticks.
+                savedPauseOnLostFocus = mc.options.pauseOnLostFocus;
+                mc.options.pauseOnLostFocus = false;
                 Craftable.LOGGER.warn("M3_SMOKE creating isolated test world");
                 mc.createWorldOpenFlows().createFreshLevel("craftable-m3-smoke-" + System.currentTimeMillis(),
                         new LevelSettings("Craftable M3 smoke", GameType.SURVIVAL, false, Difficulty.PEACEFUL,
@@ -282,12 +288,17 @@ public final class M3ClientSmoke {
                 require(mc.screen == null && mc.player.getActiveEffects().size() == 2, "Closing inventory changed active effects");
                 Screenshot.grab(mc.gameDirectory, "m3-smoke-effects-hud.png", mc.getMainRenderTarget(), ignored -> {});
                 mc.options.guiScale().set(savedScale);
+                advance();
+            } else if (stage == 28) {
+                if (!menuMoves.tick(mc)) return;
                 Craftable.LOGGER.warn("M3_SMOKE PASS: inventory layout and sword ghost, chest preview/filter/create, 200 ticks tab/index stress, physical workbench ghost, repeated creative E without requests, mode-switch returns, spectator isolation, explicit survival/adventure reopen, native wide/compact effects and HUD return");
                 stage = -1;
+                mc.options.pauseOnLostFocus = savedPauseOnLostFocus;
                 mc.stop();
             }
         } catch (Throwable failure) {
             if (savedScale >= 0) mc.options.guiScale().set(savedScale);
+            if (started) mc.options.pauseOnLostFocus = savedPauseOnLostFocus;
             Craftable.LOGGER.error("M3_SMOKE FAIL stage " + stage, failure);
             stage = -1;
             mc.stop();

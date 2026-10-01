@@ -172,6 +172,10 @@ public final class CraftingSessions {
 
         private static List<net.minecraft.world.Container> parts(ServerPlayer player,
                 org.berusted.craftable.environment.ContainerEndpoint endpoint) {
+            // Scans recreate the live adapter, not the menu-owned grid. Keep
+            // opaque slot references stable without retaining executable views.
+            if (endpoint.container() instanceof org.berusted.craftable.environment.PlayerMenuInputs inputs)
+                return List.of(inputs.grid());
             if (!(endpoint.container() instanceof net.minecraft.world.CompoundContainer compound))
                 return List.of(endpoint.container());
             var position = endpoint.position();

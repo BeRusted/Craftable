@@ -43,6 +43,7 @@ import org.berusted.craftable.planner.CraftRequest;
 public final class M4ClientSmoke {
     private static int stage, age;
     private static boolean started;
+    private static boolean oldPauseOnLostFocus;
     private static boolean queuedCancellationChecked;
     private static volatile boolean configured;
     private static Object menu;
@@ -69,6 +70,10 @@ public final class M4ClientSmoke {
             if (!started) {
                 if (!(mc.screen instanceof TitleScreen)) return;
                 started = true;
+                // Keep integrated-server progress aligned with assertion
+                // ticks even if this automated window runs in the background.
+                oldPauseOnLostFocus = mc.options.pauseOnLostFocus;
+                mc.options.pauseOnLostFocus = false;
                 oldScale = mc.options.guiScale().get();
                 oldWidth = mc.getWindow().getScreenWidth(); oldHeight = mc.getWindow().getScreenHeight();
                 oldLanguage = mc.getLanguageManager().getSelected();
@@ -464,6 +469,7 @@ public final class M4ClientSmoke {
     private static void restoreOptions() {
         if (!started) return;
         var mc = Minecraft.getInstance();
+        mc.options.pauseOnLostFocus = oldPauseOnLostFocus;
         mc.options.guiScale().set(oldScale);
         mc.options.languageCode = oldLanguage;
         mc.getLanguageManager().setSelected(oldLanguage);
