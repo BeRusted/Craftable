@@ -20,6 +20,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(RecipeButton.class)
 public abstract class RecipeButtonMixin extends AbstractWidget {
     @Shadow private int currentIndex;
+    @Shadow private float time;
     @Shadow private List<net.minecraft.world.item.crafting.RecipeHolder<?>> getOrderedRecipes() { throw new AssertionError(); }
     protected RecipeButtonMixin(int x, int y, int width, int height, Component message) { super(x, y, width, height, message); }
 
@@ -66,6 +67,10 @@ public abstract class RecipeButtonMixin extends AbstractWidget {
             target = "Lnet/minecraft/client/gui/GuiGraphics;blitSprite(Lnet/minecraft/resources/ResourceLocation;IIII)V"))
     private void craftable$background(GuiGraphics gui, ResourceLocation sprite, int x, int y, int width, int height) {
         if (!RecipeBookProjection.active()) { gui.blitSprite(sprite, x, y, width, height); return; }
+        // Vanilla updates its index after the background blit. Resolve the
+        // same upcoming frame now so tint, badge, tooltip and C agree.
+        int size = getOrderedRecipes().size();
+        if (size > 0) currentIndex = Math.floorMod(net.minecraft.util.Mth.floor(time / 30.0F), size);
         var button = (RecipeButton) (Object) this;
         var status = RecipeButtonTargetResolver.status(button);
         var target = RecipeButtonTargetResolver.preferredRecipe(button);

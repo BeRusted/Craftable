@@ -102,6 +102,15 @@ final class M4MenuMoveScenario {
                 if (slot.container == mc.player.getInventory() && slot.getContainerSlot() == 0) mainSlot = i;
             }
         }
+        // Unfiltered vanilla groups cycle oak alongside other wood outputs.
+        // Isolate resource-location changes from that legitimate target change;
+        // the output-variant module separately verifies material-specific frames.
+        var orderedMethod = RecipeButton.class.getDeclaredMethod("getOrderedRecipes");
+        orderedMethod.setAccessible(true);
+        @SuppressWarnings("unchecked") var ordered = (java.util.List<net.minecraft.world.item.crafting.RecipeHolder<?>>) orderedMethod.invoke(anchor);
+        int shown = java.util.stream.IntStream.range(0, ordered.size()).filter(i -> ordered.get(i).id().equals(PLANKS)).findFirst().orElseThrow();
+        var animation = RecipeButton.class.getDeclaredField("time"); animation.setAccessible(true); animation.setFloat(anchor, shown * 30F);
+        var index = RecipeButton.class.getDeclaredField("currentIndex"); index.setAccessible(true); index.setInt(anchor, shown);
         require(anchor.visible && RecipeButtonTargetResolver.status(anchor) == CraftingStatus.CRAFTABLE,
                 "Moved log disappeared/recolored: menu=" + kind + " tick=" + tick);
         var currentCollections = read(RecipeBookPage.class, page, "recipeCollections");

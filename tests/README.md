@@ -24,7 +24,7 @@
 | unit | `cleanTest test` | 模式/状态、手势、输入边界、预算、网络帧、快照接收/传输策略、知识文件 | 真实菜单渲染、世界事务、局域网 |
 | server | `runGameTestServer` | 环境/单步/递归/余料/回滚、见证攻击和差分、身份/续算、随机图、缓存 | 客户端帧、多设备网络延迟 |
 | inventory | `runClient -Pm3Smoke` | 原版配方书/筛选/C、实体工作台、切分类、模式和网格/光标返还、三种菜单材料换位/显示稳定、原版药水效果 | 玩家全部装备操作及真实两机体验 |
-| planning | `runClient -Pm4Smoke` | 静态目录、筛选复用/调度、Shift+C 单一操作/小刷新、自动资源更新/平移保持、混合材料分支、候选/数量/MAX/收支、见证确认、部分、GUI/语言 | 所有模组目录、低配/多人高 RTT 的普遍性能保证 |
+| planning | `runClient -Pm4Smoke` | 静态目录、筛选复用/调度、Shift+C 单一操作/小刷新、自动资源更新/平移保持、混合材料分支、候选/数量/MAX/收支、见证确认、部分、GUI/语言；船展示帧 C 与根成品切换重算 | 所有模组目录、低配/多人高 RTT 的普遍性能保证 |
 | knowledge | 连续两次 `runServer -Pm47Smoke` | 同一隔离存档跨进程缓存加载、真实 reload、专服无客户端类污染 | 首次无缓存冷启动（已有缓存时）、不同硬件/I/O 故障全集 |
 | baseline | `cleanTest test runGameTestServer build` | 无图形常规回归及 JAR | 人工验收完成 |
 
@@ -45,7 +45,8 @@
 | `client/M4ClientSmoke.java` | planning 唯一入口：准备/浏览、详情/合成、生命周期/展示三个阶段方法 |
 | `client/M4BrowsingScenario.java`、`M48SchedulingProbe.java` | 由上述入口驱动的场景/调度观察；前者不新增事件订阅或独立运行开关 |
 | `client/M4RepeatCraftScenario.java` | inventory 入口内的四次实际 C 手势，覆盖开/关筛选、显示/列表/页码/会话稳定及权威资源版本推进 |
-| `client/M4MenuMoveScenario.java` | inventory 入口末段的小场景；三种菜单使用原版点击网络包移动/拆分主背包、光标与网格材料，逐 tick 检查颜色/列表/页码/会话、权威更新和实际 C，不新增运行开关 |
+| `client/M4MenuMoveScenario.java` | inventory 入口末段的小场景；三种菜单使用原版点击网络包移动/拆分主背包、光标与网格材料，固定橡木板帧以隔离不同材质轮播，逐 tick 检查颜色/列表/页码/会话、权威更新和实际 C，不新增运行开关 |
+| `client/M4OutputVariantScenario.java` | planning 入口末段的小场景；控制原版动画帧并走真实 C/Shift+C/节点与候选按钮/确认网络，检查桦木船不替换橡木、缺料材质状态、根选择清旧约束/重算收支及 MAX |
 | `client/M4GraphPresentationScenario.java` | planning 入口内的只读图投影夹具：多批次收支/返还物汇总、同级子树数量与全部选择路径、不同材料/组件/配方/OR 不误合并、共享批次引用不重复生产；不新增测试入口 |
 | `recipe/M48ClientKnowledgeProbe.java`、`M47ServerSmoke.java` | 客户端目录取证 / knowledge 专服入口 |
 
@@ -53,7 +54,7 @@ GameTest 当前依赖 NeoForge 发现及包内测试接口，继续留在 main �
 
 ## 4. 人工边界与阶段收口
 
-- 当前唯一有效人工清单：[M4 A–L](../docs/18-m4-acceptance.md)。本轮优先 J.12 光标/输入格资源与换位无闪烁，兼顾 C.9–14、D.2/D.7 原有 UI 回归；协议 9 两端同一 JAR。
+- 当前唯一有效人工清单：[M4 A–L](../docs/18-m4-acceptance.md)。本轮优先 C.15 船材质选择与木棍同成品择优，兼顾 J.12 光标/输入格资源与换位无闪烁、C.9–14 和 D.2/D.7 原有 UI 回归；协议 9 两端同一 JAR。
 - [数据包夹具](datapacks/README.md) 用于真实配方/标签重载；不自动安装到玩家存档。
 - 自动计数证明“零服务端逐目标浏览”“见证验证零完整重搜”，玩家不必靠速度猜测或构造恶意包。
 - 低配、大目录端到端、1/16/64 容器与 1/2/8 真实客户端高 RTT 矩阵属 M8 扩展观测；不能为了收口把它们标为已通过。

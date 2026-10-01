@@ -51,6 +51,7 @@ public final class M4ClientSmoke {
     private static String oldLanguage;
     private static long previewStart;
     private static final M4BrowsingScenario browsing = new M4BrowsingScenario();
+    private static final M4OutputVariantScenario outputVariants = new M4OutputVariantScenario();
     private static long serverDetails;
     private static long witnessBefore, fullSearchesBefore;
     private static int reviewMismatchPhase;
@@ -459,6 +460,8 @@ public final class M4ClientSmoke {
                 require(mc.screen instanceof net.neoforged.neoforge.client.gui.ConfigurationScreen.ConfigurationSectionScreen,
                         "Native configuration section did not open");
                 shot("config-client");
+                next();
+            } else if (stage == 28 && outputVariants.tick(mc)) {
                 Craftable.LOGGER.warn("M4_SMOKE PASS: real Shift+C, candidates/pin, mixed MAX/slider/cost review, full/partial, GUI scales 1/2/3, zh/en, detail latency, menu/mode isolation");
                 stage = -1;
                 restoreOptions();

@@ -86,13 +86,13 @@ public final class RecipeBookInputHandler {
             return;
         }
 
-        // A vanilla button may animate through several equivalent outputs.
-        // Execute the collection's best known target, not the current frame.
+        // Optimize routes only within the displayed item's exact output group.
         RecipeHolder<?> recipe = RecipeButtonTargetResolver.preferredRecipe(hoveredButton);
         if (recipe == null) return; // A filtered/reloaded collection can disappear between render and input.
         if (detail) {
             GESTURE.clear();
-            org.berusted.craftable.client.CraftingPlanOverlay.open(event.getScreen(), recipe.id(), false);
+            org.berusted.craftable.client.CraftingPlanOverlay.open(event.getScreen(), recipe.id(), false,
+                    RecipeButtonTargetResolver.outputVariants(hoveredButton));
             event.setCanceled(true);
             return;
         }

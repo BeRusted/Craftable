@@ -44,6 +44,7 @@ public final class CraftingPlanOverlay extends Screen {
     private enum Work { PREVIEW, MAXIMUM, CANDIDATE, FALLBACK, AUTHORIZE, CONFIRM }
     private final Screen parent;
     private final Object menu, level, recipeGeneration;
+    private final List<ResourceLocation> outputVariants;
     private CraftRequest intent;
     private CraftingService.Draft draft;
     private CraftingService.Maximum maximum;
@@ -75,13 +76,14 @@ public final class CraftingPlanOverlay extends Screen {
     private final List<net.minecraft.util.FormattedCharSequence> wrappedRows = new ArrayList<>();
     private Component notice = Component.empty();
 
-    private CraftingPlanOverlay(Screen parent, ResourceLocation recipe, boolean partial) {
+    private CraftingPlanOverlay(Screen parent, ResourceLocation recipe, boolean partial, List<ResourceLocation> variants) {
         super(text("title"));
         var mc = Minecraft.getInstance();
         this.parent = parent;
         menu = mc.player.containerMenu;
         level = mc.level;
         recipeGeneration = mc.level.getRecipeManager().getRecipes();
+        outputVariants = variants.stream().distinct().limit(17).toList();
         intent = new CraftRequest(recipe, 1, partial, CraftableClientConfig.allowSurplusDrops(),
                 CraftableClientConfig.partialPolicy(), Map.of());
     }
@@ -89,10 +91,14 @@ public final class CraftingPlanOverlay extends Screen {
     public static boolean active() { return current != null && current.valid(); }
 
     public static void open(Screen parent, ResourceLocation recipe, boolean partial) {
+        open(parent, recipe, partial, List.of());
+    }
+
+    public static void open(Screen parent, ResourceLocation recipe, boolean partial, List<ResourceLocation> variants) {
         var mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null || parent != mc.screen || !RecipeBookProjection.active()
                 || RecipeBookProjection.component(parent) == null) return;
-        current = new CraftingPlanOverlay(parent, recipe, partial);
+        current = new CraftingPlanOverlay(parent, recipe, partial, variants);
         current.init(mc, parent.width, parent.height);
     }
 
@@ -382,6 +388,13 @@ public final class CraftingPlanOverlay extends Screen {
         boolean sameReview = work == Work.AUTHORIZE && self.reviewedIdentity != null
                 && self.reviewedIdentity.equals(payload.draft().view().reviewIdentity());
         self.draft = payload.draft();
+        if (local && self.choicePath.equals("0") && !self.outputVariants.isEmpty()) {
+            // Root variants are presentation context from the vanilla group.
+            // Reuse the authorized catalog and candidate probe/confirmation
+            // pipeline; do not extend recursive demands to unrelated outputs.
+            self.draft = new CraftingService.Draft(self.draft.token(), self.draft.view(),
+                    ClientBrowsePlanner.outputChoices(self.draft.view(), self.intent, self.outputVariants));
+        }
         self.displayedView = self.draft.view();
         if (work != Work.AUTHORIZE) self.submittedWitness = null;
         self.localDraft = local;
