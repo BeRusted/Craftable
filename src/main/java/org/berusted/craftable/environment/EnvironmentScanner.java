@@ -48,6 +48,12 @@ final class EnvironmentScanner {
                 player.getInventory(),
                 0,
                 36));
+        var menuInputs = PlayerMenuInputs.current(player);
+        if (menuInputs != null) {
+            endpoints.add(new ContainerEndpoint(
+                    "player:" + player.getUUID() + ":menu_inputs",
+                    EndpointKind.MENU_INPUT, null, menuInputs, 0, menuInputs.getContainerSize()));
+        }
         workstations.add(new WorkstationEndpoint(
                 "player:" + player.getUUID() + ":crafting_2x2",
                 WorkstationCapability.CRAFTING_2X2,

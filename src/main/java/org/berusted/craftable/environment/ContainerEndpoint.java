@@ -33,6 +33,6 @@ public record ContainerEndpoint(
     }
 
     public boolean isStillValid(ServerPlayer player) {
-        return kind != EndpointKind.BLOCK || container.stillValid(player);
+        return (kind != EndpointKind.BLOCK && kind != EndpointKind.MENU_INPUT) || container.stillValid(player);
     }
 }
