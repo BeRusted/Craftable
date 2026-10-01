@@ -15,6 +15,7 @@ import org.berusted.craftable.planner.PlanView;
  * network authority is manufactured and no second test runner is registered. */
 final class M4GraphPresentationScenario {
     static void verify() throws Exception {
+        verifyPlayerWording();
         var pick = id("diamond_pickaxe");
         var nodes = List.of(node("0", stack(Items.DIAMOND_PICKAXE, 3), stack(Items.DIAMOND_PICKAXE, 3), pick),
                 node("0.0", stack(Items.DIAMOND, 9), ItemStack.EMPTY, null),
@@ -103,6 +104,28 @@ final class M4GraphPresentationScenario {
         verifyCandidateTooltips();
         verifyExplanationBranches();
         System.out.println("M4_GRAPH_PRESENTATION PASS batchTotals=3 siblingPaths=5 missingGold=3 candidateInputs=3+2 tooltipRows/noLF/chestOR=8 selectedWood/rawLeaf/siblingExplanation=preserved");
+    }
+
+    static void verifyPlayerWording() {
+        var language = net.minecraft.client.Minecraft.getInstance().options.languageCode;
+        if (language.equals("zh_cn") || language.equals("en_us")) {
+            var expected = language.equals("zh_cn")
+                    ? List.of("所需材料", "消耗材料", "合成物品", "返还物品", "剩余物品")
+                    : List.of("Ingredients", "Materials used", "Crafted items", "Returned items", "Leftover items");
+            var keys = List.of("recipe_inputs", "inputs", "outputs", "remainders", "surplus");
+            for (int i = 0; i < keys.size(); i++) require(text(keys.get(i)).equals(expected.get(i)), "Player wording not loaded: " + keys.get(i));
+        }
+        var summary = org.berusted.craftable.client.menu.AmbientInventoryEvents.ruleSummary();
+        require(summary.getContents() instanceof net.minecraft.network.chat.contents.TranslatableContents,
+                "World settings lost translated text");
+        var contents = (net.minecraft.network.chat.contents.TranslatableContents) summary.getContents();
+        require(contents.getKey().equals("tooltip.craftable.rules"), "World settings unavailable in active fixture");
+        var arguments = contents.getArgs();
+        require(arguments.length == 4 && arguments[3] instanceof Component, "Ender chest setting still uses a raw boolean");
+        var enabled = ((Component) arguments[3]).getString();
+        require(enabled.equals(Component.translatable("options.on").getString())
+                || enabled.equals(Component.translatable("options.off").getString()), "Ender chest setting lost vanilla On/Off");
+        System.out.println("M4_PLAYER_WORDING PASS language=" + language + " headings/localizedRules");
     }
 
     private static void verifyMissingLeaves() throws Exception {

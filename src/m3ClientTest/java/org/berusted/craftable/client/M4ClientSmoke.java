@@ -412,6 +412,7 @@ public final class M4ClientSmoke {
             } else if (stage == 22 && age > 100 && mc.getOverlay() == null && ready()) {
                 require(net.minecraft.network.chat.Component.translatable("screen.craftable.plan.graph").getString().equals("Item chain"),
                         "English translation not loaded");
+                M4GraphPresentationScenario.verifyPlayerWording();
                 shot("english");
                 next();
             } else if (stage == 23) {

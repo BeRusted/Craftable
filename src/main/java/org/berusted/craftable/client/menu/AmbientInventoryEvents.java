@@ -128,6 +128,6 @@ public final class AmbientInventoryEvents {
     public static Component ruleSummary() {
         return rules == null ? Component.translatable("tooltip.craftable.rules_unknown")
                 : Component.translatable("tooltip.craftable.rules", rules.horizontalRadius(), rules.verticalRadius(),
-                    rules.previewCacheTicks(), rules.includeEnderChest());
+                    rules.previewCacheTicks(), Component.translatable(rules.includeEnderChest() ? "options.on" : "options.off"));
     }
 }
