@@ -79,13 +79,13 @@ public final class RecipeBookInputHandler {
             return true;
         }
 
-        // A vanilla button may animate through several equivalent outputs.
-        // Execute the collection's best known target, not the current frame.
+        // Optimize routes only within the displayed item's exact output group.
         RecipeHolder<?> recipe = RecipeButtonTargetResolver.preferredRecipe(hoveredButton);
         if (recipe == null) return true; // A filtered/reloaded collection can disappear between render and input.
         if (detail) {
             GESTURE.clear();
-            CraftingPlanOverlay.open(screen, recipe.id(), false);
+            CraftingPlanOverlay.open(screen, recipe.id(), false,
+                    RecipeButtonTargetResolver.outputVariants(hoveredButton));
             return false;
         }
         long sequence = ClientRequestSequence.next();

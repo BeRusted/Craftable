@@ -259,6 +259,23 @@ public final class ClientBrowsePlanner {
                 && mc.level.getGameTime() <= grant.expires() && input.fingerprint().equals(grant.fingerprint());
     }
 
+    /** Bounded root cards from the vanilla button's group, not recursive OR
+     * demands. All verdicts still use preview(candidateIntent) and execution
+     * still validates the selected root against the current server catalog. */
+    public static PlanView.Choices outputChoices(PlanView view, CraftRequest request, List<ResourceLocation> variants) {
+        if (!ready() || view.nodes().stream().noneMatch(n -> n.path().equals("0")))
+            return new PlanView.Choices(List.of(), false);
+        var sameOutput = view.choices(input, request, "0");
+        var ids = new java.util.LinkedHashSet<ResourceLocation>();
+        ids.add(request.recipe()); // Selected variant must survive the card cap.
+        variants.stream().limit(17).forEach(ids::add);
+        sameOutput.candidates().forEach(c -> ids.add(c.recipe()));
+        var entries = ids.stream().map(input::find).filter(java.util.Objects::nonNull).toList();
+        return new PlanView.Choices(entries.stream().limit(SearchBudget.MAX_CANDIDATES)
+                .map(e -> new PlanView.Candidate(e.id(), e.output(), e.gridSize(), input.unavailable(e))).toList(),
+                entries.size() > SearchBudget.MAX_CANDIDATES || sameOutput.truncated());
+    }
+
     /** One latest UI intent, never a second scheduler or a server request. */
     public static void preview(long sequence, CraftRequest request, String path) {
         detail = new DetailWork(sequence, effective(request), path, false);
