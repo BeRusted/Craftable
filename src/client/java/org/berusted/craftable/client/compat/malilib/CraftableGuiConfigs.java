@@ -19,6 +19,7 @@ public class CraftableGuiConfigs extends GuiConfigsBase {
 
     public CraftableGuiConfigs() {
         super(10, 50, CraftableClient.MOD_ID, null, "config.title", String.format("%s", "0.0.1"));
+        new MalilibConfigHandler().load();
     }
 
     @Override

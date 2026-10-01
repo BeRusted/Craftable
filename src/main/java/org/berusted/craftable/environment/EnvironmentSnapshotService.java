@@ -1,22 +1,25 @@
 package org.berusted.craftable.environment;
 
-import net.minecraft.server.level.ServerPlayer;
-import org.berusted.craftable.config.CraftableServerConfigHandler;
-import org.berusted.craftable.config.CraftableServerConfigHandler.EnvironmentScanSettings;
-
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import net.minecraft.server.level.ServerPlayer;
+import org.berusted.craftable.config.CraftableServerConfig;
+import org.berusted.craftable.config.EnvironmentScanSettings;
 
+/**
+ * The only runtime entry point for environment discovery. The service is
+ * intentionally main-thread-only because snapshots contain live containers.
+ */
 public final class EnvironmentSnapshotService {
     private static final Map<UUID, PlayerState> PLAYER_STATES = new HashMap<>();
 
-    private EnvironmentSnapshotService() {
-    }
+    private EnvironmentSnapshotService() {}
 
+    /** Returns a bounded-age snapshot suitable for read-only previews. */
     public static EnvironmentSnapshot preview(ServerPlayer player) {
         requireServerThread(player);
-        EnvironmentScanSettings settings = CraftableServerConfigHandler.scanSettings();
+        EnvironmentScanSettings settings = CraftableServerConfig.scanSettings();
         EnvironmentSnapshotCacheKey key = key(player, settings);
         PlayerState state = PLAYER_STATES.computeIfAbsent(player.getUUID(), ignored -> new PlayerState());
         EnvironmentSnapshot cached = state.cached;
@@ -28,10 +31,14 @@ public final class EnvironmentSnapshotService {
         return capture(player, settings, state);
     }
 
+    /**
+     * Always scans again. Resource-changing operations must use this method so
+     * a preview cache can never authorize a transaction.
+     */
     public static EnvironmentSnapshot fresh(ServerPlayer player) {
         requireServerThread(player);
         PlayerState state = PLAYER_STATES.computeIfAbsent(player.getUUID(), ignored -> new PlayerState());
-        return capture(player, CraftableServerConfigHandler.scanSettings(), state);
+        return capture(player, CraftableServerConfig.scanSettings(), state);
     }
 
     public static void invalidate(UUID playerId) {

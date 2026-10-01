@@ -17,17 +17,8 @@ public final class CraftableKeyMappings {
             )
     );
 
-    public static final KeyMapping UNDO_LAST = KeyBindingHelper.registerKeyBinding(
-            new KeyMapping(
-                    "config.key.name.undo_last",
-                    InputConstants.Type.KEYSYM,
-                    GLFW.GLFW_KEY_Z,
-                    CATEGORY
-            )
-    );
-
     public static void register() {
-        if (CREATE_ONE == null || UNDO_LAST == null) {
+        if (CREATE_ONE == null) {
             throw new IllegalStateException("Craftable 按键注册失败");
         }
     }

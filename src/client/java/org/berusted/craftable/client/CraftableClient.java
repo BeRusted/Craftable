@@ -8,7 +8,7 @@ import org.berusted.craftable.client.compat.malilib.MalilibCompat;
 import org.berusted.craftable.client.config.CraftableConfigHandler;
 import org.berusted.craftable.client.menu.AmbientInventoryEvents;
 import org.berusted.craftable.client.menu.AmbientInventoryScreen;
-import org.berusted.craftable.client.network.ClientPayloadHandler;
+import org.berusted.craftable.network.ClientPayloadHandler;
 import org.berusted.craftable.client.recipebook.RecipeBookInputHandler;
 import org.berusted.craftable.client.recipebook.RecipeBookStatusHandler;
 import org.berusted.craftable.menu.CraftableMenus;
@@ -33,6 +33,8 @@ public class CraftableClient implements ClientModInitializer {
         // 必须先于任何会用到按键的逻辑注册，且必须在 GameOptions 初始化之前
         CraftableKeyMappings.register();
 
+        org.berusted.craftable.client.recipebook.ClientBrowsePlanner.register();
+        CraftingPlanOverlay.register();
         ClientSessionEvents.register();
         AmbientInventoryEvents.register();
         ClientPayloadHandler.register();

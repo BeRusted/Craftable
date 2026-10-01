@@ -10,7 +10,7 @@ import org.berusted.craftable.environment.EnvironmentSnapshotEvents;
 import org.berusted.craftable.menu.CraftableMenus;
 import org.berusted.craftable.network.CraftableNetworkEvents;
 import org.berusted.craftable.network.CraftablePayloads;
-import org.berusted.craftable.network.ServerPayloadHandlers;
+import org.berusted.craftable.recipe.CraftingRecipes;
 
 public class Craftable implements ModInitializer {
 
@@ -33,6 +33,7 @@ public class Craftable implements ModInitializer {
         EnvironmentSnapshotEvents.register();
         CraftableNetworkEvents.register();
         CraftablePayloads.register();
-        ServerPayloadHandlers.register();
+        CraftableServerConfigHandler.init();
+        CraftingRecipes.register();
     }
 }

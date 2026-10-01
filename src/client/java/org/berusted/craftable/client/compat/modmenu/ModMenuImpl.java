@@ -8,9 +8,9 @@ import org.berusted.craftable.client.compat.malilib.MalilibCompat;
 public class ModMenuImpl implements ModMenuApi {
     @Override
     public ConfigScreenFactory<?> getModConfigScreenFactory() {
-        // 配置界面由可选模组 malilib 提供；未安装时不提供配置按钮
+        // 优先使用已安装的 malilib；缺失时使用原版组件配置界面
         if (!FabricLoader.getInstance().isModLoaded(MalilibCompat.MALILIB_MOD_ID)) {
-            return null;
+            return org.berusted.craftable.client.config.CraftableConfigScreen::new;
         }
         return MalilibCompat::createConfigScreen;
     }

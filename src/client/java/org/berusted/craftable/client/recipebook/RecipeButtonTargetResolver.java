@@ -1,16 +1,18 @@
 package org.berusted.craftable.client.recipebook;
 
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.client.gui.screens.recipebook.RecipeButton;
 import net.minecraft.client.gui.screens.recipebook.RecipeCollection;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import org.berusted.craftable.api.CraftingStatus;
 
-import java.util.ArrayList;
-import java.util.List;
-
+/**
+ * Gives one cycling vanilla recipe button one stable Craftable meaning.
+ * The animated recipe remains visual only; it must not change what C executes.
+ */
 public final class RecipeButtonTargetResolver {
-    private RecipeButtonTargetResolver() {
-    }
+    private RecipeButtonTargetResolver() {}
 
     static List<RecipeHolder<?>> candidates(RecipeButton button) {
         RecipeCollection collection = button.getCollection();
@@ -27,7 +29,7 @@ public final class RecipeButtonTargetResolver {
         RecipeCollection collection = button.getCollection();
         List<CraftingStatus> statuses = new ArrayList<>();
         for (RecipeHolder<?> candidate : candidates(button)) {
-            statuses.add(ClientRecipeStatusStore.get(
+            statuses.add(ClientRecipeStatusStore.display(
                     candidate.id(), collection.isCraftable(candidate)));
         }
         return strongestStatus(statuses);
@@ -43,9 +45,10 @@ public final class RecipeButtonTargetResolver {
         for (RecipeHolder<?> candidate : candidates) {
             boolean vanillaStatus = collection.isCraftable(candidate);
             vanillaCraftable.add(vanillaStatus);
-            statuses.add(ClientRecipeStatusStore.get(candidate.id(), vanillaStatus));
+            statuses.add(ClientRecipeStatusStore.display(candidate.id(), vanillaStatus));
         }
-
+        // Selection is independent of the animation index, including the frame
+        // between a tab/page change and vanilla's next renderWidget update.
         return candidates.get(preferredIndex(statuses, vanillaCraftable, 0));
     }
 
@@ -66,7 +69,7 @@ public final class RecipeButtonTargetResolver {
         var recipes = candidates(button);
         var target = preferredRecipe(button);
         if (target == null) return ClientRecipeStatusStore.Lifecycle.UNKNOWN;
-        if (ClientRecipeStatusStore.get(target.id(), false) == CraftingStatus.CRAFTABLE) {
+        if (ClientRecipeStatusStore.display(target.id(), false) == CraftingStatus.CRAFTABLE) {
             return ClientRecipeStatusStore.lifecycle(target.id());
         }
         boolean unknown = false;
@@ -88,6 +91,11 @@ public final class RecipeButtonTargetResolver {
                 return index;
             }
         }
+        for (int index = 0; index < statuses.size(); index++) {
+            if (statuses.get(index) == CraftingStatus.PARTIAL) return index;
+        }
+        // Before the first server response, preserve vanilla's own positive
+        // choice where possible; otherwise retain the currently shown variant.
         for (int index = 0; index < vanillaCraftable.size(); index++) {
             if (vanillaCraftable.get(index)) {
                 return index;

@@ -10,7 +10,7 @@ import java.nio.file.Path;
 
 /**
  * 客户端配置核心，负责 {@code config/craftable.json} 的初始化、读取与保存。
- * 只暴露四个操作：{@link #init()}、{@link #load()}、{@link #save()}、{@link #update(Option, boolean)}。
+ * 提供以下操作：{@link #init()}、{@link #load()}、{@link #save()}、{@link #update(Option, boolean)}。
  *
  * <p>本类必须保持零模组依赖：RecipeBookProjection、ClientPayloadHandler 等核心逻辑
  * 在 malilib 未安装时也会加载并调用这里的方法。malilib 安装后仅作为这些配置值的
@@ -46,7 +46,19 @@ public final class CraftableConfigHandler {
             return;
         }
         for (Option option : Option.values()) {
-            option.value = ConfigFileIO.getBoolean(generic, option.key, option.defaultValue);
+            option.value = option.defaultValue;
+            try {
+                var element = generic.get(option.key);
+                if (element == null || !element.isJsonPrimitive()) continue;
+                if (option.defaultValue instanceof Boolean && element.getAsJsonPrimitive().isBoolean()) option.value = element.getAsBoolean();
+                else if (option.defaultValue instanceof Integer && element.getAsJsonPrimitive().isNumber())
+                    option.value = Math.clamp(element.getAsInt(), 150, 800);
+                else if (option.defaultValue instanceof org.berusted.craftable.planner.CraftRequest.PartialPolicy
+                        && element.getAsJsonPrimitive().isString())
+                    option.value = org.berusted.craftable.planner.CraftRequest.PartialPolicy.valueOf(element.getAsString());
+            } catch (IllegalArgumentException ignored) {
+                option.value = option.defaultValue;
+            }
         }
     }
 
@@ -56,7 +68,7 @@ public final class CraftableConfigHandler {
     public static void save() {
         JsonObject generic = new JsonObject();
         for (Option option : Option.values()) {
-            generic.addProperty(option.key, option.value);
+            writeValue(generic, option);
         }
         JsonObject root = new JsonObject();
         root.add(GROUP_KEY, generic);
@@ -68,8 +80,9 @@ public final class CraftableConfigHandler {
      * 修改单个字段：更新内存值，并只把该字段合并进现有文件，
      * 文件里的其他内容（包括未知键）原样保留。
      */
-    public static void update(Option option, boolean value) {
-        option.value = value;
+    public static void update(Option option, Object value) {
+        if (!option.defaultValue.getClass().isInstance(value)) throw new IllegalArgumentException("Invalid config value");
+        option.value = value instanceof Integer number ? Math.clamp(number, 150, 800) : value;
 
         Path file = configFile();
         JsonObject root = ConfigFileIO.readObject(file);
@@ -81,7 +94,7 @@ public final class CraftableConfigHandler {
             generic = new JsonObject();
             root.add(GROUP_KEY, generic);
         }
-        generic.addProperty(option.key, value);
+        writeValue(generic, option);
         if (!root.has("config_version")) {
             root.addProperty("config_version", CONFIG_VERSION);
         }
@@ -89,20 +102,32 @@ public final class CraftableConfigHandler {
     }
 
     public static boolean get(Option option) {
-        return option.value;
+        return (Boolean) option.value;
     }
 
     // 既有调用点的语义化访问器
     public static boolean recipeBookEnhancementsEnabled() {
-        return Option.RECIPE_BOOK_ENHANCEMENTS.value;
+        return get(Option.RECIPE_BOOK_ENHANCEMENTS);
     }
 
     public static boolean detailedFailureFeedbackEnabled() {
-        return Option.DETAILED_FAILURE_FEEDBACK.value;
+        return get(Option.DETAILED_FAILURE_FEEDBACK);
     }
 
     public static boolean unlockedOnly() {
-        return Option.UNLOCKED_ONLY.value;
+        return get(Option.UNLOCKED_ONLY);
+    }
+
+    private static void writeValue(JsonObject target, Option option) {
+        if (option.value instanceof Boolean value) target.addProperty(option.key, value);
+        else if (option.value instanceof Number value) target.addProperty(option.key, value);
+        else target.addProperty(option.key, option.value.toString());
+    }
+
+    public static int doublePressMillis() { return (Integer) Option.DOUBLE_PRESS_MILLIS.value; }
+    public static boolean allowSurplusDrops() { return get(Option.ALLOW_SURPLUS_DROPS); }
+    public static org.berusted.craftable.planner.CraftRequest.PartialPolicy partialPolicy() {
+        return (org.berusted.craftable.planner.CraftRequest.PartialPolicy) Option.PARTIAL_POLICY.value;
     }
 
     private static Path configFile() {
@@ -110,18 +135,21 @@ public final class CraftableConfigHandler {
     }
 
     /**
-     * 配置项定义：json 键名 + 默认值 + 当前值，新增配置只需在这里加一行。
+     * 配置项定义：json 键名 + 默认值 + 当前值，包含显示、双击手势和制作策略设置。
      */
     public enum Option {
         RECIPE_BOOK_ENHANCEMENTS("recipe_book_enhancements", true),
         DETAILED_FAILURE_FEEDBACK("detailed_failure_feedback", true),
-        UNLOCKED_ONLY("unlocked_only", false);
+        UNLOCKED_ONLY("unlocked_only", false),
+        ALLOW_SURPLUS_DROPS("allow_surplus_drops", true),
+        DOUBLE_PRESS_MILLIS("double_press_millis", 350),
+        PARTIAL_POLICY("partial_policy", org.berusted.craftable.planner.CraftRequest.PartialPolicy.EXPLICIT_SAFE);
 
         private final String key;
-        private final boolean defaultValue;
-        private boolean value;
+        private final Object defaultValue;
+        private Object value;
 
-        Option(String key, boolean defaultValue) {
+        Option(String key, Object defaultValue) {
             this.key = key;
             this.defaultValue = defaultValue;
             this.value = defaultValue;
