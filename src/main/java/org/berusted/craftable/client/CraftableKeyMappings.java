@@ -21,18 +21,10 @@ public final class CraftableKeyMappings {
             GLFW.GLFW_KEY_C,
             CATEGORY);
 
-    public static final KeyMapping UNDO_LAST = new KeyMapping(
-            "key.craftable.undo_last",
-            KeyConflictContext.GUI,
-            InputConstants.Type.KEYSYM,
-            GLFW.GLFW_KEY_Z,
-            CATEGORY);
-
     private CraftableKeyMappings() {}
 
     @SubscribeEvent
     public static void register(RegisterKeyMappingsEvent event) {
         event.register(CREATE_ONE);
-        event.register(UNDO_LAST);
     }
 }

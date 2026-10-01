@@ -20,6 +20,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(RecipeButton.class)
 public abstract class RecipeButtonMixin extends AbstractWidget {
     @Shadow private int currentIndex;
+    @Shadow private float time;
     @Shadow private List<net.minecraft.world.item.crafting.RecipeHolder<?>> getOrderedRecipes() { throw new AssertionError(); }
     protected RecipeButtonMixin(int x, int y, int width, int height, Component message) { super(x, y, width, height, message); }
 
@@ -66,9 +67,18 @@ public abstract class RecipeButtonMixin extends AbstractWidget {
             target = "Lnet/minecraft/client/gui/GuiGraphics;blitSprite(Lnet/minecraft/resources/ResourceLocation;IIII)V"))
     private void craftable$background(GuiGraphics gui, ResourceLocation sprite, int x, int y, int width, int height) {
         if (!RecipeBookProjection.active()) { gui.blitSprite(sprite, x, y, width, height); return; }
+        // Vanilla updates its index after the background blit. Resolve the
+        // same upcoming frame now so tint, badge, tooltip and C agree.
+        int size = getOrderedRecipes().size();
+        if (size > 0) currentIndex = Math.floorMod(net.minecraft.util.Mth.floor(time / 30.0F), size);
         var button = (RecipeButton) (Object) this;
         var status = RecipeButtonTargetResolver.status(button);
-        boolean unknown = RecipeButtonTargetResolver.lifecycle(button) == ClientRecipeStatusStore.Lifecycle.UNKNOWN;
+        var target = RecipeButtonTargetResolver.preferredRecipe(button);
+        boolean limited = target != null && ClientRecipeStatusStore.displayReason(target.id())
+                == org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED;
+        // A stale display is not fresh evidence: keep its tint, show '~' and a
+        // pending tooltip. C still asks the server, never consumes this color.
+        boolean unknown = limited || target == null || !ClientRecipeStatusStore.hasDisplay(target.id());
         if (!unknown) {
             switch (status) {
                 case CRAFTABLE -> gui.setColor(0.65F, 1F, 0.65F, 1F);
@@ -87,7 +97,10 @@ public abstract class RecipeButtonMixin extends AbstractWidget {
         if (!RecipeBookProjection.active()) return;
         var button = (RecipeButton) (Object) this;
         var lifecycle = RecipeButtonTargetResolver.lifecycle(button);
-        String symbol = lifecycle == ClientRecipeStatusStore.Lifecycle.UNKNOWN ? "?"
+        var target = RecipeButtonTargetResolver.preferredRecipe(button);
+        boolean limited = target != null && ClientRecipeStatusStore.displayReason(target.id())
+                == org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED;
+        String symbol = limited || lifecycle == ClientRecipeStatusStore.Lifecycle.UNKNOWN ? "?"
                 : lifecycle == ClientRecipeStatusStore.Lifecycle.PENDING ? "~"
                 : switch (RecipeButtonTargetResolver.status(button)) {
                     case CRAFTABLE -> "+"; case PARTIAL -> "~"; case BLOCKED -> "!";
@@ -105,15 +118,22 @@ public abstract class RecipeButtonMixin extends AbstractWidget {
         if (!RecipeBookProjection.active()) return;
         var button = (RecipeButton) (Object) this;
         var lifecycle = RecipeButtonTargetResolver.lifecycle(button);
-        if (lifecycle != ClientRecipeStatusStore.Lifecycle.UNKNOWN) {
+        var target = RecipeButtonTargetResolver.preferredRecipe(button);
+        if (target == null) return;
+        boolean limited = ClientRecipeStatusStore.displayReason(target.id())
+                == org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED;
+        if (limited) {
+            ci.getReturnValue().add(Component.translatable("reason.craftable.search_budget_exceeded"));
+        } else if (lifecycle != ClientRecipeStatusStore.Lifecycle.UNKNOWN) {
             var status = RecipeButtonTargetResolver.status(button);
             Component label = Component.translatable("status.craftable." + status.name().toLowerCase(java.util.Locale.ROOT));
             ci.getReturnValue().add(status == CraftingStatus.BLOCKED
                     ? Component.translatable("tooltip.craftable.blocked_reason", label, Component.translatable("reason.craftable." +
-                        ClientRecipeStatusStore.reason(RecipeButtonTargetResolver.preferredRecipe(button).id()).name().toLowerCase(java.util.Locale.ROOT)))
+                        ClientRecipeStatusStore.displayReason(target.id()).name().toLowerCase(java.util.Locale.ROOT)))
                     : label);
         }
         if (lifecycle != ClientRecipeStatusStore.Lifecycle.KNOWN) ci.getReturnValue().add(Component.translatable("tooltip.craftable.pending"));
-        ci.getReturnValue().add(Component.translatable("tooltip.craftable.create_one"));
+        ci.getReturnValue().add(Component.translatable("tooltip.craftable.create_one",
+                org.berusted.craftable.client.CraftableKeyMappings.CREATE_ONE.getTranslatedKeyMessage()));
     }
 }

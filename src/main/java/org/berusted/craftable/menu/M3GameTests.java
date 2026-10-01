@@ -13,7 +13,7 @@ import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.berusted.craftable.Craftable;
 import org.berusted.craftable.api.CraftingResultCode;
-import org.berusted.craftable.execution.DirectCraftingService;
+import org.berusted.craftable.execution.CraftingService;
 import org.berusted.craftable.environment.EnvironmentSnapshotService;
 import net.minecraft.resources.ResourceLocation;
 
@@ -109,18 +109,29 @@ public final class M3GameTests {
         h.succeed();
     }
 
-    @GameTest(templateNamespace = "minecraft", template = TEMPLATE)
+    @GameTest(templateNamespace = "minecraft", template = TEMPLATE, timeoutTicks = 240)
     public static void directCreateStillUsesM2TransactionInsideNewMenu(GameTestHelper h) {
         var player = player(h);
         try {
             open(h, player);
             player.getInventory().setItem(0, new ItemStack(Items.OAK_PLANKS, 2));
-            h.assertValueEqual(DirectCraftingService.createOne(player, ResourceLocation.withDefaultNamespace("stick")),
-                    CraftingResultCode.CREATED, "C transaction result");
-            h.assertValueEqual(player.getInventory().countItem(Items.STICK), 4, "C output");
-            h.assertValueEqual(player.getInventory().countItem(Items.OAK_PLANKS), 0, "C cost");
-        } finally { cleanup(player); }
-        h.succeed();
+        } catch (RuntimeException | Error failure) { cleanup(player); throw failure; }
+        // Keep the real production deadline, but do not run a deterministic
+        // menu contract amid the same-tick 64-container/random-graph benchmark.
+        // Deadline safety is tested separately with an injected expired clock.
+        h.runAfterDelay(120, () -> {
+            try {
+                // Other GameTests replace RecipeManager directly, bypassing
+                // M4.7's startup/reload index warmup. Restore that normal
+                // precondition, without raising the real C search deadline.
+                new org.berusted.craftable.recipe.CraftingRecipes(player, true);
+                h.assertValueEqual(CraftingService.createOne(player, ResourceLocation.withDefaultNamespace("stick")),
+                        CraftingResultCode.CREATED, "C transaction result");
+                h.assertValueEqual(player.getInventory().countItem(Items.STICK), 4, "C output");
+                h.assertValueEqual(player.getInventory().countItem(Items.OAK_PLANKS), 0, "C cost");
+                h.succeed();
+            } finally { cleanup(player); }
+        });
     }
 
     @GameTest(templateNamespace = "minecraft", template = TEMPLATE)
@@ -209,7 +220,7 @@ public final class M3GameTests {
             long[] samples = new long[20];
             for (int sample = 0; sample < samples.length; sample++) {
                 long start = System.nanoTime();
-                for (int i = 0; i < 32; i++) DirectCraftingService.evaluate(player, id, snapshot);
+                for (int i = 0; i < 32; i++) CraftingService.evaluate(player, id, snapshot);
                 samples[sample] = System.nanoTime() - start;
             }
             java.util.Arrays.sort(samples);
@@ -232,7 +243,7 @@ public final class M3GameTests {
                 player.getInventory().setItem(0, new ItemStack(Items.OAK_PLANKS, 2));
                 player.setGameMode(mode);
                 h.assertFalse(menu.stillValid(player), "Forbidden mode retained temporary menu");
-                h.assertValueEqual(DirectCraftingService.createOne(player, ResourceLocation.withDefaultNamespace("stick")),
+                h.assertValueEqual(CraftingService.createOne(player, ResourceLocation.withDefaultNamespace("stick")),
                         CraftingResultCode.INVALID_CONTEXT, "Forged create in forbidden mode");
                 menu.clicked(0, 0, ClickType.PICKUP, player);
                 h.assertTrue(player.containerMenu == player.inventoryMenu, "Old menu not closed");

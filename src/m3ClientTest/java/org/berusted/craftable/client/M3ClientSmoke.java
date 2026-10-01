@@ -41,6 +41,13 @@ public final class M3ClientSmoke {
     private static boolean started;
     private static volatile boolean configured;
     private static long quietSequence;
+    private static long previewStart;
+    private static final M4RepeatCraftScenario repeatCraft = new M4RepeatCraftScenario();
+    private static final M4MenuMoveScenario menuMoves = new M4MenuMoveScenario();
+    private static boolean wideEffectsRendered, compactEffectsRendered;
+    private static int savedScale = -1;
+    private static boolean savedPauseOnLostFocus;
+    private static final java.util.List<Long> previewSamples = new java.util.ArrayList<>();
     private static final BlockPos TABLE = new BlockPos(2, -60, 0);
     private static final BlockPos CHEST = new BlockPos(1, -60, 1);
     private static final ResourceLocation STICK = ResourceLocation.withDefaultNamespace("stick");
@@ -53,6 +60,10 @@ public final class M3ClientSmoke {
             if (!started) {
                 if (!(mc.screen instanceof TitleScreen)) return;
                 started = true;
+                // A background test window must not pause the integrated
+                // server while the client keeps counting assertion ticks.
+                savedPauseOnLostFocus = mc.options.pauseOnLostFocus;
+                mc.options.pauseOnLostFocus = false;
                 Craftable.LOGGER.warn("M3_SMOKE creating isolated test world");
                 mc.createWorldOpenFlows().createFreshLevel("craftable-m3-smoke-" + System.currentTimeMillis(),
                         new LevelSettings("Craftable M3 smoke", GameType.SURVIVAL, false, Difficulty.PEACEFUL,
@@ -75,12 +86,19 @@ public final class M3ClientSmoke {
                     level.setBlockAndUpdate(CHEST.above(), Blocks.AIR.defaultBlockState());
                     ((ChestBlockEntity) level.getBlockEntity(CHEST)).setItem(0, new ItemStack(Items.OAK_PLANKS, 16));
                     player.getInventory().clearContent();
+                    player.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.NIGHT_VISION, 24000));
+                    player.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.MOVEMENT_SPEED, 24000));
                     configured = true;
                 });
                 advance();
             } else if (stage == 1 && configured && age > 60) {
                 mc.player.getRecipeBook().setOpen(RecipeBookType.CRAFTING, true);
                 mc.player.getRecipeBook().setFiltering(RecipeBookType.CRAFTING, false);
+                // Match a real vanilla book toggle. A client-only flag is
+                // overwritten by the first recipe-unlock packet's server
+                // settings, folding the book and intentionally stopping demand.
+                mc.getConnection().send(new net.minecraft.network.protocol.game.ServerboundRecipeBookChangeSettingsPacket(
+                        RecipeBookType.CRAFTING, true, false));
                 mc.setScreen(new InventoryScreen(mc.player));
                 advance();
             } else if (stage == 2 && mc.screen instanceof AmbientInventoryScreen screen) {
@@ -91,6 +109,9 @@ public final class M3ClientSmoke {
                 advance();
             } else if (stage == 3 && age > 80) {
                 var button = button();
+                Craftable.LOGGER.warn("M4_CLIENT stick status={} reason={} lifecycle={} generation={}",
+                        RecipeButtonTargetResolver.status(button), ClientRecipeStatusStore.reason(STICK),
+                        ClientRecipeStatusStore.lifecycle(STICK), ClientRecipeStatusStore.revision());
                 require(RecipeButtonTargetResolver.status(button) == CraftingStatus.CRAFTABLE, "Chest-only stick not craftable");
                 require(button.getCollection().hasCraftable(), "Vanilla collection not craftable");
                 require(RecipeButtonTargetResolver.preferredRecipe(button).id().equals(STICK), "Wrong recipe variant selected");
@@ -99,11 +120,17 @@ public final class M3ClientSmoke {
                 advance();
             } else if (stage == 4 && age > 40) {
                 require(mc.player.getInventory().countItem(Items.STICK) == 4, "C did not create 4 sticks");
+                Craftable.LOGGER.warn("M48_RECOVERY status={} reason={} lifecycle={} searches={} builds={}",
+                        ClientRecipeStatusStore.get(STICK, false), ClientRecipeStatusStore.reason(STICK),
+                        ClientRecipeStatusStore.lifecycle(STICK), org.berusted.craftable.client.recipebook.ClientBrowsePlanner.searches(),
+                        org.berusted.craftable.client.recipebook.ClientBrowsePlanner.catalogBuilds());
+                require(((AmbientInventoryScreen) mc.screen).getRecipeBookComponent().isVisible(), "Fixture unexpectedly folded recipe book");
                 require(ClientRecipeStatusStore.get(STICK, false) == CraftingStatus.CRAFTABLE, "Repeat craft did not recover state");
                 mc.player.getRecipeBook().setFiltering(RecipeBookType.CRAFTING, true);
                 ((AmbientInventoryScreen) mc.screen).getRecipeBookComponent().recipesUpdated();
                 advance();
             } else if (stage == 5 && age > 40) {
+                if (!repeatCraft.tick(mc)) return;
                 require(button().getCollection().hasCraftable(), "Craftable filter removed chest recipe");
                 Screenshot.grab(mc.gameDirectory, "m3-smoke-filtered.png", mc.getMainRenderTarget(), ignored -> {});
                 mc.getSingleplayerServer().execute(() -> mc.getSingleplayerServer().overworld().setBlockAndUpdate(TABLE, Blocks.AIR.defaultBlockState()));
@@ -143,8 +170,7 @@ public final class M3ClientSmoke {
                     player.openMenu(Blocks.CRAFTING_TABLE.defaultBlockState().getMenuProvider(level, TABLE));
                 });
                 advance();
-            } else if (stage == 10 && mc.screen instanceof net.minecraft.client.gui.screens.inventory.CraftingScreen screen
-                    && !(screen instanceof AmbientInventoryScreen)) {
+            } else if (stage == 10 && mc.screen instanceof net.minecraft.client.gui.screens.inventory.CraftingScreen screen) {
                 searchSticks(screen.getRecipeBookComponent());
                 showSwordGhost(screen.getRecipeBookComponent());
                 advance();
@@ -154,7 +180,7 @@ public final class M3ClientSmoke {
                 PacketDistributor.sendToServer(new CreateRecipeRequestPayload(STICK, ClientRequestSequence.next()));
                 advance();
             } else if (stage == 12 && age > 30) {
-                require(mc.player.getInventory().countItem(Items.STICK) == 8, "Physical workbench C failed");
+                require(mc.player.getInventory().countItem(Items.STICK) == 24, "Physical workbench C failed");
                 mc.player.closeContainer();
                 mc.setScreen(new InventoryScreen(mc.player));
                 advance();
@@ -222,15 +248,67 @@ public final class M3ClientSmoke {
                 // Capture after rendered frames, not in the tick that sets up
                 // the ghost. Compare compact output against the workbench shot.
                 Screenshot.grab(mc.gameDirectory, "m3-smoke-inventory-ghost.png", mc.getMainRenderTarget(), ignored -> {});
-                Craftable.LOGGER.warn("M3_SMOKE PASS: inventory layout and sword ghost, chest preview/filter/create, 200 ticks tab/index stress, physical workbench ghost, repeated creative E without requests, mode-switch returns, spectator isolation, explicit survival/adventure reopen");
+                searchSticks(((AmbientInventoryScreen) mc.screen).getRecipeBookComponent());
+                advance();
+            } else if (stage == 23) {
+                if (previewStart == 0) {
+                    RecipeBookStatusHandler.afterCreate(STICK);
+                    previewStart = System.nanoTime();
+                } else if (ClientRecipeStatusStore.lifecycle(STICK) == ClientRecipeStatusStore.Lifecycle.KNOWN
+                        && ClientRecipeStatusStore.reason(STICK) != org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED) {
+                    previewSamples.add(System.nanoTime() - previewStart);
+                    previewStart = 0;
+                    if (previewSamples.size() < 40) return;
+                    previewSamples.sort(Long::compare);
+                    Craftable.LOGGER.warn("M4_CLIENT_PREVIEW warm_stick samples=40 p50={}ms p95={}ms max={}ms (invalidate through real network to known client state)",
+                            previewSamples.get(19)/1e6, previewSamples.get(37)/1e6, previewSamples.get(39)/1e6);
+                    require(previewSamples.get(37) <= 500_000_000L, "Warm visible target exceeded P95 500 ms");
+                    advance();
+                }
+            } else if (stage == 24) {
+                savedScale = mc.options.guiScale().get();
+                mc.getWindow().setWindowed(1280, 960);
+                mc.options.guiScale().set(2); mc.resizeDisplay();
+                wideEffectsRendered = false;
+                advance();
+            } else if (stage == 25 && age > 30) {
+                require(((AmbientInventoryScreen) mc.screen).canSeeEffects() && wideEffectsRendered,
+                        "Vanilla wide effect renderer/HUD suppression not reached");
+                Screenshot.grab(mc.gameDirectory, "m3-smoke-effects-wide.png", mc.getMainRenderTarget(), ignored -> {});
+                mc.options.guiScale().set(3); mc.resizeDisplay();
+                compactEffectsRendered = false;
+                advance();
+            } else if (stage == 26 && age > 30) {
+                require(((AmbientInventoryScreen) mc.screen).canSeeEffects() && compactEffectsRendered,
+                        "Vanilla compact effect renderer/HUD suppression not reached");
+                Screenshot.grab(mc.gameDirectory, "m3-smoke-effects-compact.png", mc.getMainRenderTarget(), ignored -> {});
+                mc.player.closeContainer();
+                advance();
+            } else if (stage == 27 && age > 20) {
+                require(mc.screen == null && mc.player.getActiveEffects().size() == 2, "Closing inventory changed active effects");
+                Screenshot.grab(mc.gameDirectory, "m3-smoke-effects-hud.png", mc.getMainRenderTarget(), ignored -> {});
+                mc.options.guiScale().set(savedScale);
+                advance();
+            } else if (stage == 28) {
+                if (!menuMoves.tick(mc)) return;
+                Craftable.LOGGER.warn("M3_SMOKE PASS: inventory layout and sword ghost, chest preview/filter/create, 200 ticks tab/index stress, physical workbench ghost, repeated creative E without requests, mode-switch returns, spectator isolation, explicit survival/adventure reopen, native wide/compact effects and HUD return");
                 stage = -1;
+                mc.options.pauseOnLostFocus = savedPauseOnLostFocus;
                 mc.stop();
             }
         } catch (Throwable failure) {
+            if (savedScale >= 0) mc.options.guiScale().set(savedScale);
+            if (started) mc.options.pauseOnLostFocus = savedPauseOnLostFocus;
             Craftable.LOGGER.error("M3_SMOKE FAIL stage " + stage, failure);
             stage = -1;
             mc.stop();
         }
+    }
+    @SubscribeEvent public static void effects(net.neoforged.neoforge.client.event.ScreenEvent.RenderInventoryMobEffects event) {
+        if (!Boolean.getBoolean("craftable.m3Smoke") || !(event.getScreen() instanceof AmbientInventoryScreen)) return;
+        // Observe the real vanilla renderer; don't implement a test-only effect layout.
+        if (event.isCompact()) compactEffectsRendered = true;
+        else wideEffectsRendered = true;
     }
     private static void advance() { stage++; age = 0; Craftable.LOGGER.warn("M3_SMOKE stage {}", stage); }
     private static void showSwordGhost(net.minecraft.client.gui.screens.recipebook.RecipeBookComponent book) {
