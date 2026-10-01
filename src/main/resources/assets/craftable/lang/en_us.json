@@ -123,11 +123,11 @@
   "screen.craftable.plan.quantity_compact": "%s × → %s items",
   "screen.craftable.plan.use_recipe": "Use recipe",
   "screen.craftable.plan.graph_help": "Up/down selects a node; left/right pans; Enter changes recipe; Space collapses. Scroll pans; Shift-scroll pans horizontally.",
-  "screen.craftable.plan.explanation_node": "Recipe structure only (per batch); not counted as actual consumption.",
   "screen.craftable.plan.or": "Alternatives: choose one, do not add them together.",
   "screen.craftable.plan.need": "Needs %s × %s",
   "screen.craftable.plan.made": "Makes %s × %s",
   "screen.craftable.plan.shared": "Groups %s demand positions",
   "screen.craftable.plan.recipe_inputs": "Recipe inputs",
+  "screen.craftable.plan.input_options": "%s × (%s; choose any for each)",
   "screen.craftable.plan.recipe_outputs": "Recipe outputs"
 }

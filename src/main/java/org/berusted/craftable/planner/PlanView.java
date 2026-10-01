@@ -242,12 +242,19 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
             var actualRecipes = nodes.values().stream().filter(n -> n.actual).flatMap(n -> n.recipes.stream()).toList();
             var producer = chosen == null ? producers.stream().filter(e -> !active.contains(e.id()))
                     .filter(e -> !conversionCycleWithoutStock(catalog, e, stock))
+                    .filter(e -> !onlyReprocessesAcceptedItems(e, requirement.ingredient()))
                     .min(java.util.Comparator.<CraftingRecipes.Entry, Boolean>comparing(e -> !actualRecipes.contains(e.id()))
                             .thenComparing(CraftingRecipes.Entry::id)).orElse(null)
                     : catalog.find(chosen);
             if (producer != null && catalog.unavailable(producer) != CraftingResultCode.UNSUPPORTED_RECIPE
                     && requirement.ingredient().test(producer.output()) && !active.contains(producer.id())) {
                 child.recipes.add(producer.id());
+                // A chosen recipe fixes the output variant. Keeping the first
+                // Ingredient option here labels oak wood as oak log, or keeps
+                // an oak icon after the player selected birch planks.
+                child.needs.clear();
+                child.needs.add(producer.output().copyWithCount(batches));
+                child.alternatives = false;
                 int upstreamBatches = (batches + producer.output().getCount() - 1) / producer.output().getCount();
                 if (!explain(catalog, request, nodes, producer, childPath, active, depth + 1, stock, upstreamBatches)) return false;
             }
@@ -265,6 +272,17 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
                 && !catalog.producing(r.ingredient()).isEmpty()
                 && catalog.producing(r.ingredient()).stream().allMatch(back -> !back.requirements().isEmpty()
                         && back.requirements().stream().allMatch(input -> input.ingredient().test(producer.output()))));
+    }
+
+    /** Default explanation need not turn four accepted logs into three accepted
+     * wood blocks just to feed a log/wood ingredient. Keep the raw demand as an
+     * honest leaf. Explicit selections and real executable steps still show the
+     * conversion, and gaining recipes are not covered by this display shortcut. */
+    private static boolean onlyReprocessesAcceptedItems(CraftingRecipes.Entry producer,
+            net.minecraft.world.item.crafting.Ingredient demand) {
+        return !producer.requirements().isEmpty() && producer.output().getCount() <= producer.requirements().size()
+                && producer.requirements().stream().allMatch(r -> r.ingredient().getItems().length > 0
+                        && java.util.Arrays.stream(r.ingredient().getItems()).allMatch(demand::test));
     }
 
     private static List<ItemStack> takeStock(List<ItemStack> stock, net.minecraft.world.item.crafting.Ingredient ingredient, int count) {

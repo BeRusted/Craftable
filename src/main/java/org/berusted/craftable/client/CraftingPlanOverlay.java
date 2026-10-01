@@ -159,29 +159,61 @@ public final class CraftingPlanOverlay extends Screen {
     }
 
     private Component candidateLabel(PlanView.Candidate candidate) {
-        var state = candidateStates.get(candidate.recipe());
-        String marker = state == null || state == CraftingResultCode.SEARCH_BUDGET_EXCEEDED ? "? "
-                : state == CraftingResultCode.CREATED ? "+ " : state == CraftingResultCode.PARTIAL_CREATED ? "! " : "× ";
-        return Component.literal(marker).append(candidate.output().getHoverName()).append(" ×" + candidate.output().getCount())
-                .append(" [" + candidate.recipe().getPath() + "]");
+        return candidate.output().getHoverName().copy().append(" ×" + candidate.output().getCount());
     }
 
-    private Component candidateDescription(PlanView.Candidate candidate) {
-        var description = Component.literal(candidate.recipe().toString()).append("\n")
-                .append(text("candidate_grid", candidate.gridSize(), candidate.gridSize()));
+    private List<Component> candidateTooltip(PlanView.Candidate candidate) {
+        // GuiGraphics accepts tooltip rows, not a multiline document. In-band
+        // LF can reach the glyph renderer without wrapping on short tooltips.
+        var lines = new ArrayList<Component>();
+        lines.add(candidateLabel(candidate));
+        lines.add(text("candidate_grid", candidate.gridSize(), candidate.gridSize()));
         minecraft.level.getRecipeManager().byKey(candidate.recipe()).ifPresent(holder -> {
-            for (var ingredient : holder.value().getIngredients()) if (!ingredient.isEmpty()) {
-                description.append("\n").append(text("inputs")).append(" ");
-                var alternatives = java.util.Arrays.stream(ingredient.getItems()).limit(3).toList();
-                description.append(items(alternatives));
-                if (ingredient.getItems().length > 1) description.append(text("or"));
-                if (ingredient.getItems().length > 3) description.append("…");
-            }
+            lines.addAll(candidateInputLines(holder.value().getIngredients()));
         });
-        if (candidate.rejection() != null) description.append("\n").append(Component.translatable("reason.craftable."
+        if (candidate.rejection() != null) lines.add(Component.translatable("reason.craftable."
                 + candidate.rejection().name().toLowerCase(java.util.Locale.ROOT)));
-        return description;
+        return lines;
     }
+
+    private static List<Component> candidateInputLines(List<net.minecraft.world.item.crafting.Ingredient> ingredients) {
+        var groups = new ArrayList<CandidateInputGroup>();
+        for (var ingredient : ingredients) if (!ingredient.isEmpty()) {
+            var options = new ArrayList<ItemStack>();
+            for (var option : ingredient.getItems()) if (options.stream().noneMatch(s -> ItemStack.isSameItemSameComponents(s, option)))
+                options.add(option.copyWithCount(1));
+            if (options.isEmpty()) continue;
+            // Compare complete candidate sets BEFORE display truncation. Equal
+            // OR slots mean N independent choices, not N of every alternative
+            // and not a requirement to pick the same material for all slots.
+            int at = -1;
+            for (int i = 0; i < groups.size(); i++) {
+                var other = groups.get(i).options();
+                if (other.size() == options.size() && other.stream().allMatch(s -> options.stream()
+                        .anyMatch(o -> ItemStack.isSameItemSameComponents(s, o)))) { at = i; break; }
+            }
+            if (at < 0) groups.add(new CandidateInputGroup(options, 1));
+            else groups.set(at, new CandidateInputGroup(groups.get(at).options(), groups.get(at).count() + 1));
+        }
+        var lines = new ArrayList<Component>();
+        for (var group : groups) {
+            var line = text("recipe_inputs").copy().append(" ");
+            if (group.options().size() == 1) line.append(items(List.of(group.options().getFirst().copyWithCount(group.count()))));
+            else {
+                var names = Component.empty();
+                for (var option : group.options().stream().limit(3).toList()) {
+                    if (!names.getString().isEmpty()) names.append(", ");
+                    names.append(option.getHoverName());
+                }
+                if (group.options().size() > 3) names.append(", …");
+                line.append(text("input_options", group.count(), names));
+            }
+            lines.add(line);
+        }
+        return lines;
+    }
+
+    private record CandidateInputGroup(List<ItemStack> options, int count) {}
 
     private void choose(List<String> paths) {
         if (paths.isEmpty()) return;
@@ -472,7 +504,6 @@ public final class CraftingPlanOverlay extends Screen {
         var candidate = selectedCandidate();
         previousChoice.active = nextChoice.active = candidate != null && draft.choices().candidates().size() > 1;
         applyChoice.active = candidate != null && !dirty;
-        applyChoice.setTooltip(candidate == null ? null : net.minecraft.client.gui.components.Tooltip.create(candidateDescription(candidate)));
         slider.setTooltip(net.minecraft.client.gui.components.Tooltip.create(maximum == null || maximum.pending() ? text("max_waiting")
                 : maximum.proven() ? text("max", maximum.lowerBound()) : text("max_lower", maximum.lowerBound())));
     }
@@ -594,8 +625,8 @@ public final class CraftingPlanOverlay extends Screen {
         // Draw tooltips only after every slot/item. Later texture blits otherwise
         // cover parts of the tooltip even though it was requested for an earlier slot.
         if (!hoveredIngredient.isEmpty()) g.renderTooltip(font, hoveredIngredient, mx, my);
-        if (mx >= cx + 30 && mx < cx + 76 && my >= cy + 30 && my < cy + 60)
-            g.renderComponentTooltip(font, List.of(candidateLabel(candidate), candidateDescription(candidate)), mx, my);
+        if (mx >= cx + 30 && mx < cx + 76 && my >= cy + 30 && my < cy + 60 || applyChoice.isHoveredOrFocused())
+            g.renderComponentTooltip(font, candidateTooltip(candidate), mx, my);
     }
 
     private void drawChoiceLabel(GuiGraphics g, Component label, int centerX, int y) {

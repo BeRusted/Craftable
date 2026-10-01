@@ -123,11 +123,11 @@
   "screen.craftable.plan.quantity_compact": "%s 次 → %s 件",
   "screen.craftable.plan.use_recipe": "选择此配方",
   "screen.craftable.plan.graph_help": "上下键选择节点，左右键平移，回车更换配方，空格折叠；滚轮平移，Shift+滚轮横移。",
-  "screen.craftable.plan.explanation_node": "仅为配方结构说明（每批）；不计入实际消耗。",
   "screen.craftable.plan.or": "任选其一，不是全部相加。",
   "screen.craftable.plan.need": "需求 %s × %s",
   "screen.craftable.plan.made": "本次制造 %s × %s",
   "screen.craftable.plan.shared": "合并了 %s 个需求位置",
   "screen.craftable.plan.recipe_inputs": "配方输入",
+  "screen.craftable.plan.input_options": "%s ×（%s；每个任选其一）",
   "screen.craftable.plan.recipe_outputs": "配方产出"
 }

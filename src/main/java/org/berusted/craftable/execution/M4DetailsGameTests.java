@@ -113,6 +113,40 @@ public final class M4DetailsGameTests {
         helper.succeed();
     }
 
+    @GameTest(templateNamespace = "minecraft", template = EMPTY)
+    public static void missingWoodExplanationUsesRawDemandAndSelectedOutput(GameTestHelper helper) {
+        var player = M4PlanningGameTests.player(helper);
+        try {
+            var catalog = new CraftingRecipes(player, true);
+            var blocked = org.berusted.craftable.planner.SearchResult.blocked(
+                    org.berusted.craftable.api.CraftingResultCode.MISSING_INGREDIENTS);
+            var boat = PlanView.from(catalog, request("oak_boat"), blocked, List.of());
+            helper.assertTrue(boat.nodes().stream().noneMatch(n -> n.recipes().stream()
+                    .anyMatch(id -> id.getPath().equals("oak_wood"))), "default missing log was processed into wood first");
+            helper.assertTrue(boat.operations().isEmpty() && boat.consumed().isEmpty(), "explanation fabricated execution costs");
+            var explicitWood = new CraftRequest(ResourceLocation.withDefaultNamespace("oak_planks"), 1, false, false,
+                    CraftRequest.PartialPolicy.EXPLICIT_SAFE, java.util.Map.of("0.0", ResourceLocation.withDefaultNamespace("oak_wood")));
+            var wood = PlanView.from(catalog, explicitWood, blocked, List.of());
+            var selected = wood.nodes().stream().filter(n -> n.path().equals("0.0")).findFirst().orElseThrow();
+            helper.assertTrue(selected.needs().size() == 1 && selected.needs().getFirst().is(Items.OAK_WOOD)
+                    && !selected.alternatives(), "explicit wood recipe was still labeled as an oak log");
+            helper.assertTrue(selected.recipes().contains(ResourceLocation.withDefaultNamespace("oak_wood")),
+                    "display simplification suppressed an explicit selection");
+            helper.assertValueEqual(wood.nodes().stream().filter(n -> n.path().startsWith("0.0."))
+                    .flatMap(n -> n.needs().stream()).filter(s -> s.is(Items.OAK_LOG)).mapToInt(ItemStack::getCount).sum(),
+                    4, "explicit wood inputs are not four logs");
+            var birchRequest = new CraftRequest(ResourceLocation.withDefaultNamespace("stick"), 1, false, false,
+                    CraftRequest.PartialPolicy.EXPLICIT_SAFE, java.util.Map.of("0.0", ResourceLocation.withDefaultNamespace("birch_planks")));
+            var birch = PlanView.from(catalog, birchRequest, blocked, List.of());
+            var planks = birch.nodes().stream().filter(n -> n.path().equals("0.0")).findFirst().orElseThrow();
+            helper.assertTrue(planks.needs().size() == 1 && planks.needs().getFirst().is(Items.BIRCH_PLANKS),
+                    "changing planks recipe did not change its displayed output");
+            helper.assertTrue(birch.operations().isEmpty() && birch.consumed().isEmpty()
+                    && birch.code() == blocked.code(), "selection explanation became an executable plan");
+        } finally { M4PlanningGameTests.remove(player); }
+        helper.succeed();
+    }
+
     private static CraftRequest request(String id) {
         return CraftRequest.one(ResourceLocation.withDefaultNamespace(id));
     }

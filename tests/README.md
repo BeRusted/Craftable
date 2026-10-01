@@ -37,7 +37,7 @@
 | `src/test/java/org/berusted/craftable/` | 按生产包分组的 JUnit；不保留已退役协议的自循环编解码测试 |
 | `src/main/java/.../execution/M2GameTests.java`、`menu/M3GameTests.java` | 既有环境/菜单/直接合成边界 |
 | `execution/M4PlanningGameTests.java`、`M4TransactionGameTests.java`、`M4RandomGraphGameTests.java` | 递归、可逆转换剪枝/改产量反例、全需求缺口数量/有材料起点诊断、账本结果/容量/事务/回滚统计及随机图 |
-| `execution/M4DetailsGameTests.java`、`M4InteractionGameTests.java` | 详情/部分意图、令牌、完整见证/空转拒绝、服务器失败证据复用、C/详情缺口一致和失败不消费、成功操作与多批次统计 |
+| `execution/M4DetailsGameTests.java`、`M4InteractionGameTests.java` | 详情/部分意图、令牌、完整见证/空转拒绝、服务器失败证据复用、C/详情缺口一致和失败不消费、成功操作与多批次统计；默认原木解释不绕木头、显式木头选择/桦木产物与无虚构成本 |
 | `execution/M4MenuResourceGameTests.java` | 原版 2×2/临时背包/实体工作台输入及光标实际取料；结果/非当前网格排除、稳定引用/换位失效、见证零重搜、容量/保护栈及回滚 |
 | `execution/M48ContinuationGameTests.java`、`M4PreviewGameTests.java` | 同核心续算、共享闭包/证据；旧批量 facade 的基线不是现行网络入口 |
 | `recipe/M4KnowledgeGameTests.java` | 静态关系与缓存边界 |
@@ -47,14 +47,14 @@
 | `client/M4RepeatCraftScenario.java` | inventory 入口内的四次实际 C 手势，覆盖开/关筛选、显示/列表/页码/会话稳定及权威资源版本推进 |
 | `client/M4MenuMoveScenario.java` | inventory 入口末段的小场景；三种菜单使用原版点击网络包移动/拆分主背包、光标与网格材料，固定橡木板帧以隔离不同材质轮播，逐 tick 检查颜色/列表/页码/会话、权威更新和实际 C，不新增运行开关 |
 | `client/M4OutputVariantScenario.java` | planning 入口末段的小场景；控制原版动画帧并走真实 C/Shift+C/节点与候选按钮/确认网络，检查桦木船不替换橡木、缺料材质状态、根选择清旧约束/重算收支及 MAX |
-| `client/M4GraphPresentationScenario.java` | planning 入口内的只读图投影夹具：多批次收支/返还物汇总、同级子树数量与全部选择路径、不同材料/组件/配方/OR 不误合并、共享批次引用不重复生产；不新增测试入口 |
+| `client/M4GraphPresentationScenario.java` | planning 入口内的只读图投影夹具：批次收支、同级实际/解释子树及相同缺料集合数量/全部选择路径，不同材料/组件/配方/OR 集合不误合并、引用不重复生产；候选卡显式行/无 LF/去 ID、固定和通配输入汇总，真实共享目录的船原木叶及手选桦木投影，不新增测试入口 |
 | `recipe/M48ClientKnowledgeProbe.java`、`M47ServerSmoke.java` | 客户端目录取证 / knowledge 专服入口 |
 
 GameTest 当前依赖 NeoForge 发现及包内测试接口，继续留在 main 源集；开发客户端夹具不打入 JAR。不能因“所有测试放一起”而暴露核心私有接口或改变发现方式。
 
 ## 4. 人工边界与阶段收口
 
-- 当前唯一有效人工清单：[M4 A–L](../docs/18-m4-acceptance.md)。本轮优先 C.15 船材质选择与木棍同成品择优，兼顾 J.12 光标/输入格资源与换位无闪烁、C.9–14 和 D.2/D.7 原有 UI 回归；协议 9 两端同一 JAR。
+- 当前唯一有效人工清单：[M4 A–L](../docs/18-m4-acceptance.md)。本轮优先 C.17 LF/通配输入/解释链，兼顾 C.16 缺料叶、C.15 船材质、J.12 光标/输入格换位及 C.9–14、D.2/D.7 原有 UI 回归；协议 9 两端同一 JAR。
 - [数据包夹具](datapacks/README.md) 用于真实配方/标签重载；不自动安装到玩家存档。
 - 自动计数证明“零服务端逐目标浏览”“见证验证零完整重搜”，玩家不必靠速度猜测或构造恶意包。
 - 低配、大目录端到端、1/16/64 容器与 1/2/8 真实客户端高 RTT 矩阵属 M8 扩展观测；不能为了收口把它们标为已通过。

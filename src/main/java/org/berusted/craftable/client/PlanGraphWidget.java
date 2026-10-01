@@ -253,10 +253,9 @@ final class PlanGraphWidget extends AbstractWidget {
         var lines = new ArrayList<Component>();
         lines.add(icon(cell).getHoverName());
         if (cell.deviation) lines.add(Component.translatable("screen.craftable.plan.additional_material"));
-        if (cell.explanation) lines.add(Component.translatable("screen.craftable.plan.explanation_node"));
-        else if (cell.made.isEmpty() && cell.recipes.isEmpty())
+        if (!cell.explanation && cell.made.isEmpty() && cell.recipes.isEmpty())
             lines.add(Component.translatable("screen.craftable.plan.existing"));
-        if (cell.alternatives) lines.add(Component.translatable("screen.craftable.plan.or"));
+        if (cell.alternatives && cell.needs.size() > 1) lines.add(Component.translatable("screen.craftable.plan.or"));
         for (var stack : cell.needs) lines.add(Component.translatable("screen.craftable.plan.need", stack.getCount(), stack.getHoverName()));
         for (var stack : cell.made) lines.add(Component.translatable("screen.craftable.plan.made", stack.getCount(), stack.getHoverName()));
         // Summarize the selected real operations once, not once per batch.
@@ -310,17 +309,29 @@ final class PlanGraphWidget extends AbstractWidget {
             java.util.Set<String> referenced, Map<String, Object> shapes) {
         var node = raw.get(path);
         if (node == null) return null;
-        boolean safe = !referenced.contains(path) && !node.alternatives();
+        var childPaths = children.getOrDefault(path, List.of());
+        // Explanation marks even a single fixed missing item as alternatives.
+        // Identical terminal option sets are additive independent demands, not
+        // AND inputs. At the projection's 16-option cap the set might be cut,
+        // so do not infer equivalence. References retain distinct semantics.
+        // Selected explanation subtrees can merge only with identical shapes.
+        // This is a display
+        // alias, never a change to the demand graph or executable operations.
+        boolean equivalentMissingLeaf = node.explanation() && node.alternatives()
+                && !node.needs().isEmpty() && node.needs().size() < 16 && node.needs().stream().noneMatch(ItemStack::isEmpty)
+                && node.made().isEmpty() && node.recipes().isEmpty() && childPaths.isEmpty();
+        boolean safe = !referenced.contains(path) && node.reference().isEmpty()
+                && (!node.alternatives() || equivalentMissingLeaf);
         var childShapes = new ArrayList<Object>();
-        for (String child : children.getOrDefault(path, List.of())) {
+        for (String child : childPaths) {
             Object childShape = shape(child, raw, children, referenced, shapes);
             safe &= childShape != null;
             if (childShape != null) childShapes.add(List.of(child.substring(path.length()), childShape));
         }
         if (!safe) return null;
-        Object result = List.of(CraftPlan.stackKeys(node.needs().stream().map(s -> s.copyWithCount(1)).toList()),
+        Object result = List.of(new java.util.HashSet<>(CraftPlan.stackKeys(node.needs().stream().map(s -> s.copyWithCount(1)).toList())),
                 CraftPlan.stackKeys(node.made().stream().map(s -> s.copyWithCount(1)).toList()),
-                node.recipes(), node.explanation(), childShapes);
+                node.recipes(), node.explanation(), node.alternatives(), childShapes);
         shapes.put(path, result);
         return result;
     }
