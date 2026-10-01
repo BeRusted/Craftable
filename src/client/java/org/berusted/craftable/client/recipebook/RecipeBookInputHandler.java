@@ -7,17 +7,18 @@ import net.minecraft.client.gui.screens.recipebook.RecipeBookComponent;
 import net.minecraft.client.gui.screens.recipebook.RecipeBookPage;
 import net.minecraft.client.gui.screens.recipebook.RecipeButton;
 import net.minecraft.world.item.crafting.RecipeHolder;
-import org.berusted.craftable.Craftable;
-import org.berusted.craftable.client.CraftableKeyMappings;
 import org.berusted.craftable.client.ClientRequestSequence;
+import org.berusted.craftable.client.CraftableKeyMappings;
+import org.berusted.craftable.client.CraftingPlanOverlay;
+import org.berusted.craftable.client.DoublePressGesture;
 import org.berusted.craftable.client.mixin.RecipeBookComponentAccessor;
 import org.berusted.craftable.client.mixin.RecipeBookPageAccessor;
-import org.berusted.craftable.config.CraftableClientConfig;
-import org.berusted.craftable.network.CreateRecipeRequestPayload;
+import org.berusted.craftable.client.config.CraftableClientConfig;
+import org.berusted.craftable.client.network.CreateRecipeRequestPayload;
 
 public final class RecipeBookInputHandler {
-    private static final org.berusted.craftable.client.DoublePressGesture GESTURE =
-            new org.berusted.craftable.client.DoublePressGesture();
+    private static final DoublePressGesture GESTURE =
+            new DoublePressGesture();
     private RecipeBookInputHandler() {}
 
     public static void register() {
@@ -37,7 +38,7 @@ public final class RecipeBookInputHandler {
     }
 
     private static boolean onKeyPressed(net.minecraft.client.gui.screens.Screen screen, int keyCode, int scanCode, int modifiers) {
-        if (org.berusted.craftable.client.CraftingPlanOverlay.active()) return true;
+        if (CraftingPlanOverlay.active()) return true;
         if (!RecipeBookProjection.active()) {
             return true;
         }
@@ -84,7 +85,7 @@ public final class RecipeBookInputHandler {
         if (recipe == null) return true; // A filtered/reloaded collection can disappear between render and input.
         if (detail) {
             GESTURE.clear();
-            org.berusted.craftable.client.CraftingPlanOverlay.open(screen, recipe.id(), false);
+            CraftingPlanOverlay.open(screen, recipe.id(), false);
             return false;
         }
         long sequence = ClientRequestSequence.next();

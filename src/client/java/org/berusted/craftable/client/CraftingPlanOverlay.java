@@ -13,14 +13,13 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import org.berusted.craftable.Craftable;
 import org.berusted.craftable.api.CraftingResultCode;
 import org.berusted.craftable.client.recipebook.RecipeBookProjection;
 import org.berusted.craftable.client.recipebook.ClientBrowsePlanner;
-import org.berusted.craftable.config.CraftableClientConfig;
+import org.berusted.craftable.client.config.CraftableClientConfig;
 import org.berusted.craftable.execution.CraftingService;
-import org.berusted.craftable.network.CraftingDetailPayloads;
-import org.berusted.craftable.network.CreateRecipeResultPayload;
+import org.berusted.craftable.client.network.CraftingDetailPayloads;
+import org.berusted.craftable.client.network.CreateRecipeResultPayload;
 import org.berusted.craftable.planner.CraftRequest;
 import org.berusted.craftable.planner.PlanView;
 

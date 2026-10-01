@@ -8,11 +8,10 @@ import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.client.gui.screens.options.OptionsScreen;
 import net.minecraft.network.chat.Component;
-import org.berusted.craftable.Craftable;
 import org.berusted.craftable.client.ClientRequestSequence;
-import org.berusted.craftable.config.CraftableClientConfig;
-import org.berusted.craftable.network.OpenInventoryRequestPayload;
-import org.berusted.craftable.config.EnvironmentScanSettings;
+import org.berusted.craftable.client.config.CraftableClientConfig;
+import org.berusted.craftable.client.network.OpenInventoryRequestPayload;
+import org.berusted.craftable.client.config.EnvironmentScanSettings;
 
 public final class AmbientInventoryEvents {
     private static Screen requestedFrom;

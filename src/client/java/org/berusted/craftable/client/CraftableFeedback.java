@@ -12,7 +12,7 @@ public final class CraftableFeedback {
 
     private CraftableFeedback() {}
 
-    public static void showCreateResult(org.berusted.craftable.network.CreateRecipeResultPayload payload, boolean detailed) {
+    public static void showCreateResult(org.berusted.craftable.client.network.CreateRecipeResultPayload payload, boolean detailed) {
         var code = payload.resultCode();
         if (code == CraftingResultCode.PARTIAL_CREATED || !payload.drops().isEmpty()
                 || detailed && code == CraftingResultCode.MISSING_INGREDIENTS && !payload.missing().isEmpty()) {

@@ -7,7 +7,7 @@ import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
-import org.berusted.craftable.config.EnvironmentScanSettings;
+import org.berusted.craftable.client.config.EnvironmentScanSettings;
 import org.berusted.craftable.workstation.WorkstationCapability;
 import org.berusted.craftable.workstation.WorkstationEndpoint;
 

@@ -3,7 +3,6 @@ package org.berusted.craftable.client.config;
 import com.google.gson.JsonObject;
 import net.fabricmc.loader.api.FabricLoader;
 import org.berusted.craftable.Craftable;
-import org.berusted.craftable.config.ConfigFileIO;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

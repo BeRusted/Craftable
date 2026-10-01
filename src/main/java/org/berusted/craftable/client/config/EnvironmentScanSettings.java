@@ -1,4 +1,4 @@
-package org.berusted.craftable.config;
+package org.berusted.craftable.client.config;
 
 /**
  * Validated server settings that participate in environment snapshot identity.

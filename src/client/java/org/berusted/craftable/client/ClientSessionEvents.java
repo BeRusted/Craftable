@@ -24,7 +24,7 @@ public final class ClientSessionEvents {
     }
     private static void clearSessionState() {
         CraftingPlanOverlay.clear();
-        org.berusted.craftable.network.ClientPayloadHandler.clear();
+        org.berusted.craftable.client.network.ClientPayloadHandler.clear();
         ClientBrowsePlanner.disconnect();
         ClientRecipeStatusStore.clear();
         org.berusted.craftable.client.menu.AmbientInventoryEvents.clear();

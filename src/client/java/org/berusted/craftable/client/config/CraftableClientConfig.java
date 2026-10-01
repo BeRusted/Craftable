@@ -1,6 +1,5 @@
-package org.berusted.craftable.config;
+package org.berusted.craftable.client.config;
 
-import org.berusted.craftable.client.config.CraftableConfigHandler;
 import org.berusted.craftable.planner.CraftRequest;
 
 /** Client settings backed by the existing Fabric JSON configuration. */

@@ -25,7 +25,7 @@ import net.minecraft.world.level.block.entity.RandomizableContainerBlockEntity;
 import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.ChestType;
-import org.berusted.craftable.config.EnvironmentScanSettings;
+import org.berusted.craftable.client.config.EnvironmentScanSettings;
 import org.berusted.craftable.workstation.WorkstationCapability;
 import org.berusted.craftable.workstation.WorkstationEndpoint;
 

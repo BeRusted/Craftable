@@ -1,4 +1,4 @@
-package org.berusted.craftable.menu;
+package org.berusted.craftable.client.menu;
 
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;

@@ -1,4 +1,4 @@
-package org.berusted.craftable.network;
+package org.berusted.craftable.client.network;
 
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
@@ -32,8 +32,8 @@ public final class CraftingDetailPayloads {
     }
 
     public record BrowseLease(int menuId, long revision, UUID session, long recipes, long resources,
-            long expires, String fingerprint, CraftingWire.SnapshotHeader header,
-            org.berusted.craftable.config.EnvironmentScanSettings settings, boolean workbench) implements CustomPacketPayload {
+                              long expires, String fingerprint, CraftingWire.SnapshotHeader header,
+                              org.berusted.craftable.client.config.EnvironmentScanSettings settings, boolean workbench) implements CustomPacketPayload {
         public BrowseLease {
             identity(menuId, revision);
             if (recipes < 0 || resources < 0 || fingerprint.length() != 64
@@ -52,7 +52,7 @@ public final class CraftingDetailPayloads {
                 }, b -> {
                     int menu = b.readVarInt(); long revision = b.readVarLong(); UUID session = b.readUUID();
                     long recipes = b.readVarLong(), resources = b.readVarLong(), expires = b.readLong(); String fingerprint = b.readUtf(64);
-                    var settings = new org.berusted.craftable.config.EnvironmentScanSettings(b.readVarInt(), b.readVarInt(), b.readVarInt(), b.readBoolean());
+                    var settings = new org.berusted.craftable.client.config.EnvironmentScanSettings(b.readVarInt(), b.readVarInt(), b.readVarInt(), b.readBoolean());
                     boolean workbench = b.readBoolean();
                     CraftingWire.SnapshotHeader header = null;
                     if (b.readBoolean()) { UUID transfer = b.readUUID(); int bytes = b.readVarInt(), chunks = b.readVarInt(); byte[] digest = new byte[32]; b.readBytes(digest);

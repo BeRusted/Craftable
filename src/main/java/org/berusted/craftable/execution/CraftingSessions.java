@@ -8,7 +8,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.berusted.craftable.api.CraftingResultCode;
-import org.berusted.craftable.config.CraftableServerConfig;
+import org.berusted.craftable.client.config.CraftableServerConfig;
 import org.berusted.craftable.planner.CraftPlan;
 import org.berusted.craftable.planner.CraftRequest;
 

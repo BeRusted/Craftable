@@ -10,7 +10,7 @@ import net.minecraft.client.gui.screens.recipebook.RecipeCollection;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import org.berusted.craftable.client.mixin.RecipeBookComponentAccessor;
-import org.berusted.craftable.config.CraftableClientConfig;
+import org.berusted.craftable.client.config.CraftableClientConfig;
 
 /** One scoped projection over vanilla's already-synchronized recipe catalog. */
 public final class RecipeBookProjection {
@@ -24,7 +24,7 @@ public final class RecipeBookProjection {
     }
     public static boolean active() {
         return !restoring && net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.canSend(
-                org.berusted.craftable.network.CraftingDetailPayloads.BrowseRequest.TYPE) && modeAllowed() && CraftableClientConfig.recipeBookEnhancementsEnabled()
+                org.berusted.craftable.client.network.CraftingDetailPayloads.BrowseRequest.TYPE) && modeAllowed() && CraftableClientConfig.recipeBookEnhancementsEnabled()
                 && component(Minecraft.getInstance().screen) != null;
     }
     public static boolean modeAllowed() {

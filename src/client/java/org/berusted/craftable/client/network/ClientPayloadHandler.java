@@ -1,9 +1,10 @@
-package org.berusted.craftable.network;
+package org.berusted.craftable.client.network;
 
 import net.minecraft.client.Minecraft;
 import org.berusted.craftable.client.CraftableFeedback;
+import org.berusted.craftable.client.CraftingPlanOverlay;
 import org.berusted.craftable.client.recipebook.RecipeBookStatusHandler;
-import org.berusted.craftable.config.CraftableClientConfig;
+import org.berusted.craftable.client.config.CraftableClientConfig;
 
 public final class ClientPayloadHandler {
     private static long lastCreateResponseRequestId = Long.MIN_VALUE;
@@ -27,7 +28,7 @@ public final class ClientPayloadHandler {
     }
 
     public static void handle(CraftingDetailPayloads.PreviewResponse payload) {
-        org.berusted.craftable.client.CraftingPlanOverlay.receive(payload);
+        CraftingPlanOverlay.receive(payload);
     }
 
 
@@ -40,7 +41,7 @@ public final class ClientPayloadHandler {
         if (payload.resultCode() != org.berusted.craftable.api.CraftingResultCode.REQUEST_THROTTLED
                 && payload.resultCode() != org.berusted.craftable.api.CraftingResultCode.INVALID_CONTEXT)
             RecipeBookStatusHandler.afterCreate(payload.recipeId());
-        org.berusted.craftable.client.CraftingPlanOverlay.created(payload);
+        CraftingPlanOverlay.created(payload);
         CraftableFeedback.showCreateResult(payload, CraftableClientConfig.detailedFailureFeedbackEnabled());
     }
 }

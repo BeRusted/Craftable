@@ -6,11 +6,12 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
 import org.berusted.craftable.Craftable;
 import org.berusted.craftable.client.ClientRequestSequence;
-import org.berusted.craftable.config.CraftableClientConfig;
+import org.berusted.craftable.client.CraftingPlanOverlay;
+import org.berusted.craftable.client.config.CraftableClientConfig;
 import org.berusted.craftable.environment.BrowsingSnapshot;
 import org.berusted.craftable.execution.MainInventoryInsertion;
-import org.berusted.craftable.network.CraftingDetailPayloads;
-import org.berusted.craftable.network.CraftingWire;
+import org.berusted.craftable.client.network.CraftingDetailPayloads;
+import org.berusted.craftable.client.network.CraftingWire;
 import org.berusted.craftable.planner.*;
 import org.berusted.craftable.recipe.PlanningInput;
 
@@ -73,7 +74,7 @@ public final class ClientBrowsePlanner {
         if (recipeCollection != collection) { recipeCollection = collection; recipesChanged(); }
         boolean open = net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.canSend(CraftingDetailPayloads.BrowseRequest.TYPE)
                 && RecipeBookProjection.modeAllowed() && CraftableClientConfig.recipeBookEnhancementsEnabled()
-                && (RecipeBookProjection.component(mc.screen) != null || org.berusted.craftable.client.CraftingPlanOverlay.active());
+                && (RecipeBookProjection.component(mc.screen) != null || CraftingPlanOverlay.active());
         if (!open) { closeView(); return; }
         if (menu != mc.player.containerMenu) {
             closeView(); menu = mc.player.containerMenu; menuId = mc.player.containerMenu.containerId;
@@ -135,7 +136,7 @@ public final class ClientBrowsePlanner {
         // Resetting a value scope clears its store. Authorize *after* that
         // reset, so a freshly bound valid snapshot does not blink for one tick.
         ClientRecipeStatusStore.authorizeLocal(fresh);
-        if (!org.berusted.craftable.client.CraftingPlanOverlay.active()) cancelDetails();
+        if (!CraftingPlanOverlay.active()) cancelDetails();
         // A completed cheap target need not idle until the next game tick.
         // Every dispatch keeps the same deadline and the same 3:1 fairness;
         // continuations keep their cumulative budgets. The count bound also
@@ -305,7 +306,7 @@ public final class ClientBrowsePlanner {
         if (!ClientRecipeStatusStore.canRecord(request)) {
             if (work.maximum) {
                 detail = null;
-                org.berusted.craftable.client.CraftingPlanOverlay.receiveMaximum(
+                CraftingPlanOverlay.receiveMaximum(
                         menuId, work.sequence, new org.berusted.craftable.execution.CraftingService.Maximum(
                                 0, false, snapshot.maxBatches(), true, false));
             } else publishPreview(work, SearchResult.blocked(org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED));
@@ -359,14 +360,14 @@ public final class ClientBrowsePlanner {
             retainedRequest = null; retainedResult = null;
             ClientRecipeStatusStore.completeLocal(work.request, SearchResult.blocked(draft.view().code()), null, true);
         }
-        org.berusted.craftable.client.CraftingPlanOverlay.receiveLocal(
+        CraftingPlanOverlay.receiveLocal(
                 new CraftingDetailPayloads.PreviewResponse(menuId, work.sequence, draft));
     }
 
     private static void publishMaximum(DetailWork work) {
         var maximum = maximumView(work.request, snapshot.maxBatches());
         if (!maximum.pending()) detail = null;
-        org.berusted.craftable.client.CraftingPlanOverlay.receiveMaximum(menuId, work.sequence, maximum);
+        CraftingPlanOverlay.receiveMaximum(menuId, work.sequence, maximum);
     }
 
     static org.berusted.craftable.execution.CraftingService.Maximum maximumView(CraftRequest intent, int cap) {

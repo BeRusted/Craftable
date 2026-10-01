@@ -4,8 +4,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import net.minecraft.server.level.ServerPlayer;
-import org.berusted.craftable.config.CraftableServerConfig;
-import org.berusted.craftable.config.EnvironmentScanSettings;
+import org.berusted.craftable.client.config.CraftableServerConfig;
+import org.berusted.craftable.client.config.EnvironmentScanSettings;
 
 /**
  * The only runtime entry point for environment discovery. The service is

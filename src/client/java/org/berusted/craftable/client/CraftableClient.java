@@ -8,10 +8,10 @@ import org.berusted.craftable.client.compat.malilib.MalilibCompat;
 import org.berusted.craftable.client.config.CraftableConfigHandler;
 import org.berusted.craftable.client.menu.AmbientInventoryEvents;
 import org.berusted.craftable.client.menu.AmbientInventoryScreen;
-import org.berusted.craftable.network.ClientPayloadHandler;
+import org.berusted.craftable.client.network.ClientPayloadHandler;
 import org.berusted.craftable.client.recipebook.RecipeBookInputHandler;
 import org.berusted.craftable.client.recipebook.RecipeBookStatusHandler;
-import org.berusted.craftable.menu.CraftableMenus;
+import org.berusted.craftable.client.menu.CraftableMenus;
 
 public class CraftableClient implements ClientModInitializer {
 

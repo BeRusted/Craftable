@@ -5,11 +5,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import net.minecraft.resources.ResourceLocation;
+
 import net.minecraft.server.level.ServerPlayer;
 import org.berusted.craftable.Craftable;
 import org.berusted.craftable.api.CraftingResultCode;
-import org.berusted.craftable.config.CraftableServerConfig;
+import org.berusted.craftable.client.config.CraftableServerConfig;
 import org.berusted.craftable.environment.EnvironmentSnapshot;
 import org.berusted.craftable.environment.EnvironmentSnapshotService;
 import org.berusted.craftable.planner.CraftPlan;

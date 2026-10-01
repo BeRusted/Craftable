@@ -2,7 +2,7 @@ package org.berusted.craftable.environment;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
-import org.berusted.craftable.config.EnvironmentScanSettings;
+import org.berusted.craftable.client.config.EnvironmentScanSettings;
 
 /** Pure cache identity and age policy, kept separate so it can be unit tested. */
 record EnvironmentSnapshotCacheKey(

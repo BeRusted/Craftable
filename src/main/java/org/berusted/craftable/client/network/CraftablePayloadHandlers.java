@@ -1,4 +1,4 @@
-package org.berusted.craftable.network;
+package org.berusted.craftable.client.network;
 
 import net.minecraft.server.level.ServerPlayer;
 import org.berusted.craftable.api.CraftingResultCode;
@@ -95,7 +95,7 @@ public final class CraftablePayloadHandlers {
                 net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
                         new CraftingDetailPayloads.BrowseLease(transfer.request.menuId(), transfer.request.revision(),
                                 snapshot.session(), snapshot.recipes(), snapshot.resources(), now + 10, fingerprint, header,
-                                org.berusted.craftable.config.CraftableServerConfig.scanSettings(), snapshot.workbench()));
+                                org.berusted.craftable.client.config.CraftableServerConfig.scanSettings(), snapshot.workbench()));
             } catch (RuntimeException failure) {
                 // Release all retained values on failed normalization/capture.
                 transfer.bytes = null; transfer.snapshot = null; transfer.retained = 0;
@@ -195,7 +195,7 @@ public final class CraftablePayloadHandlers {
             player.inventoryMenu.removed(player);
             player.inventoryMenu.broadcastChanges();
             player.openMenu(new net.minecraft.world.SimpleMenuProvider(
-                    (id, inventory, owner) -> new org.berusted.craftable.menu.AmbientInventoryMenu(id, inventory, tables),
+                    (id, inventory, owner) -> new org.berusted.craftable.client.menu.AmbientInventoryMenu(id, inventory, tables),
                     net.minecraft.network.chat.Component.translatable("container.crafting")));
         });
     }

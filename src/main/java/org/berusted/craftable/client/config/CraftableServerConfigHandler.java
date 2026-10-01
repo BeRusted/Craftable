@@ -1,4 +1,4 @@
-package org.berusted.craftable.config;
+package org.berusted.craftable.client.config;
 
 import com.google.gson.JsonObject;
 import java.nio.file.Files;

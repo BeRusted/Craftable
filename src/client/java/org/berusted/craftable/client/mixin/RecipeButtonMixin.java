@@ -7,6 +7,7 @@ import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.screens.recipebook.RecipeButton;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import org.berusted.craftable.client.CraftableKeyMappings;
 import org.berusted.craftable.api.CraftingStatus;
 import org.berusted.craftable.client.recipebook.*;
 import org.spongepowered.asm.mixin.Mixin;
@@ -129,6 +130,6 @@ public abstract class RecipeButtonMixin extends AbstractWidget {
         }
         if (lifecycle != ClientRecipeStatusStore.Lifecycle.KNOWN) ci.getReturnValue().add(Component.translatable("tooltip.craftable.pending"));
         ci.getReturnValue().add(Component.translatable("tooltip.craftable.create_one",
-                org.berusted.craftable.client.CraftableKeyMappings.CREATE_ONE.getTranslatedKeyMessage()));
+                CraftableKeyMappings.CREATE_ONE.getTranslatedKeyMessage()));
     }
 }

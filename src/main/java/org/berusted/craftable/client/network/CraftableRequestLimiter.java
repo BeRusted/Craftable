@@ -1,4 +1,4 @@
-package org.berusted.craftable.network;
+package org.berusted.craftable.client.network;
 
 import java.util.HashMap;
 import java.util.Map;

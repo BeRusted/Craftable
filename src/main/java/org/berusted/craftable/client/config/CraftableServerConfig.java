@@ -1,4 +1,4 @@
-package org.berusted.craftable.config;
+package org.berusted.craftable.client.config;
 
 import org.berusted.craftable.planner.CraftRequest;
 

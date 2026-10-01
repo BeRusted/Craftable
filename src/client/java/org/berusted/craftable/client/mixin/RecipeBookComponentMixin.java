@@ -7,7 +7,7 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 import org.berusted.craftable.client.CraftableFeedback;
 import org.berusted.craftable.client.recipebook.RecipeBookProjection;
 import org.berusted.craftable.api.CraftingResultCode;
-import org.berusted.craftable.menu.AmbientInventoryMenu;
+import org.berusted.craftable.client.menu.AmbientInventoryMenu;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;

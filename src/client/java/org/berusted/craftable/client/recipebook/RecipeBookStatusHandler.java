@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
-import org.berusted.craftable.Craftable;
+import org.berusted.craftable.client.CraftingPlanOverlay;
 import org.berusted.craftable.client.mixin.RecipeBookComponentAccessor;
 import org.berusted.craftable.client.mixin.RecipeBookPageAccessor;
 
@@ -23,7 +23,7 @@ public final class RecipeBookStatusHandler {
 
     public static void onRender(net.minecraft.client.gui.screens.Screen screen, net.minecraft.client.gui.GuiGraphics graphics, int mouseX, int mouseY, float tickDelta) {
         var mc = Minecraft.getInstance();
-        if (org.berusted.craftable.client.CraftingPlanOverlay.active()) return;
+        if (CraftingPlanOverlay.active()) return;
         var component = RecipeBookProjection.component(screen);
         if (!RecipeBookProjection.active() || component == null || mc.level == null || mc.player == null) return;
         long now = mc.level.getGameTime();

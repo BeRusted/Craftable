@@ -1,4 +1,4 @@
-package org.berusted.craftable.network;
+package org.berusted.craftable.client.network;
 
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
