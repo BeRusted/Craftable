@@ -1,11 +1,14 @@
 package org.berusted.craftable.workstation;
 
-import net.minecraft.core.BlockPos;
-import org.jetbrains.annotations.Nullable;
-
 import java.util.Objects;
+import org.jetbrains.annotations.Nullable;
+import net.minecraft.core.BlockPos;
 
-public record WorkstationEndpoint(String id, WorkstationCapability capability, @Nullable BlockPos position) {
+/** A stable source of one workstation capability in a single snapshot. */
+public record WorkstationEndpoint(
+        String id,
+        WorkstationCapability capability,
+        @Nullable BlockPos position) {
     public WorkstationEndpoint {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(capability, "capability");

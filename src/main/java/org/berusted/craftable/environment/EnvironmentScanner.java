@@ -1,5 +1,9 @@
 package org.berusted.craftable.environment;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.component.DataComponents;
@@ -10,52 +14,50 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.LockCode;
 import net.minecraft.world.entity.monster.Shulker;
-import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.EnderChestBlock;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
 import net.minecraft.world.level.block.entity.BaseContainerBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.RandomizableContainerBlockEntity;
 import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.ChestType;
-import org.berusted.craftable.config.EnvironmentScanSettings;
+import org.berusted.craftable.client.config.EnvironmentScanSettings;
 import org.berusted.craftable.workstation.WorkstationCapability;
 import org.berusted.craftable.workstation.WorkstationEndpoint;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-
-public class EnvironmentScanner {
+/** Performs one bounded, vanilla-only world scan for {@link EnvironmentSnapshotService}. */
+final class EnvironmentScanner {
     private static final String VANILLA_NAMESPACE = "minecraft";
 
-    private EnvironmentScanner() {
-    }
+    private EnvironmentScanner() {}
 
-    static EnvironmentSnapshot scan(ServerPlayer player, EnvironmentScanSettings settings, long generation) {
+    static EnvironmentSnapshot scan(
+            ServerPlayer player, EnvironmentScanSettings settings, long generation) {
         ServerLevel level = player.serverLevel();
         BlockPos origin = player.blockPosition();
         List<ContainerEndpoint> endpoints = new ArrayList<>();
         List<WorkstationEndpoint> workstations = new ArrayList<>();
-
-        endpoints.add(
-                new ContainerEndpoint(
-                        "player:" + player.getUUID() + ":inventory",
-                        EndpointKind.PLAYER,
-                        null,
-                        player.getInventory(),
-                        0,
-                        36
-                )
-        );
-
-        workstations.add(
-                new WorkstationEndpoint(
-                        "player:" + player.getUUID() + ":crafting_2x2",
-                        WorkstationCapability.CRAFTING_2X2,
-                        null
-                )
-        );
+        endpoints.add(new ContainerEndpoint(
+                "player:" + player.getUUID() + ":inventory",
+                EndpointKind.PLAYER,
+                null,
+                player.getInventory(),
+                0,
+                36));
+        var menuInputs = PlayerMenuInputs.current(player);
+        if (menuInputs != null) {
+            endpoints.add(new ContainerEndpoint(
+                    "player:" + player.getUUID() + ":menu_inputs",
+                    EndpointKind.MENU_INPUT, null, menuInputs, 0, menuInputs.getContainerSize()));
+        }
+        workstations.add(new WorkstationEndpoint(
+                "player:" + player.getUUID() + ":crafting_2x2",
+                WorkstationCapability.CRAFTING_2X2,
+                null));
 
         boolean enderChestAvailable = false;
         BlockPos enderChestPosition = null;
@@ -76,12 +78,10 @@ public class EnvironmentScanner {
             BlockState state = level.getBlockState(pos);
             Block block = state.getBlock();
             if (block == Blocks.CRAFTING_TABLE) {
-                workstations.add(
-                        new WorkstationEndpoint(
-                                workstationEndpointId(level, pos, WorkstationCapability.CRAFTING_3X3),
-                                WorkstationCapability.CRAFTING_3X3,
-                                pos)
-                );
+                workstations.add(new WorkstationEndpoint(
+                        workstationEndpointId(level, pos, WorkstationCapability.CRAFTING_3X3),
+                        WorkstationCapability.CRAFTING_3X3,
+                        pos));
             }
 
             if (settings.includeEnderChest() && block instanceof EnderChestBlock) {
@@ -117,30 +117,24 @@ public class EnvironmentScanner {
                 continue;
             }
 
-            endpoints.add(
-                    new ContainerEndpoint(
-                            blockEndpointId(level, pos),
-                            EndpointKind.BLOCK,
-                            pos,
-                            container,
-                            0,
-                            container.getContainerSize()
-                    )
-            );
+            endpoints.add(new ContainerEndpoint(
+                    blockEndpointId(level, pos),
+                    EndpointKind.BLOCK,
+                    pos,
+                    container,
+                    0,
+                    container.getContainerSize()));
         }
 
         if (enderChestAvailable) {
             Container enderInventory = player.getEnderChestInventory();
-            endpoints.add(
-                    new ContainerEndpoint(
-                            "player:" + player.getUUID() + ":ender_chest",
-                            EndpointKind.ENDER_CHEST,
-                            enderChestPosition,
-                            enderInventory,
-                            0,
-                            enderInventory.getContainerSize()
-                    )
-            );
+            endpoints.add(new ContainerEndpoint(
+                    "player:" + player.getUUID() + ":ender_chest",
+                    EndpointKind.ENDER_CHEST,
+                    enderChestPosition,
+                    enderInventory,
+                    0,
+                    enderInventory.getContainerSize()));
         }
 
         return new EnvironmentSnapshot(
@@ -151,7 +145,6 @@ public class EnvironmentScanner {
                 generation,
                 endpoints,
                 workstations);
-
     }
 
     private static void addChest(

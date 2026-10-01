@@ -5,15 +5,17 @@ import net.minecraft.resources.ResourceLocation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.berusted.craftable.command.CraftableCommands;
+import org.berusted.craftable.client.config.CraftableServerConfigHandler;
 import org.berusted.craftable.environment.EnvironmentSnapshotEvents;
-import org.berusted.craftable.menu.CraftableMenus;
-import org.berusted.craftable.network.CraftableNetworkEvents;
-import org.berusted.craftable.network.CraftablePayloads;
-import org.berusted.craftable.network.ServerPayloadHandlers;
+import org.berusted.craftable.client.menu.CraftableMenus;
+import org.berusted.craftable.client.network.CraftableNetworkEvents;
+import org.berusted.craftable.client.network.CraftablePayloads;
+import org.berusted.craftable.recipe.CraftingRecipes;
 
 public class Craftable implements ModInitializer {
 
     public static final String MOD_ID = "craftable";
+    public static final String MOD_NAME = "Craftable";
     public static final Logger LOGGER = LogManager.getLogger();
 
     public Craftable() {
@@ -31,6 +33,7 @@ public class Craftable implements ModInitializer {
         EnvironmentSnapshotEvents.register();
         CraftableNetworkEvents.register();
         CraftablePayloads.register();
-        ServerPayloadHandlers.register();
+        CraftableServerConfigHandler.init();
+        CraftingRecipes.register();
     }
 }
