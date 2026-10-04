@@ -22,6 +22,7 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
         List<ItemStack> drops, List<CraftPlan.Missing> missing) {
     public static final int MAX_NODES = 256;
     public static final int MAX_MISSING = 32;
+    private static final int MAX_ALTERNATIVE_OPTIONS = 16_384;
 
     public PlanView {
         nodes = List.copyOf(nodes);
@@ -98,7 +99,9 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
                 found.size() > SearchBudget.MAX_CANDIDATES);
     }
 
-    /** needs are AND for actual inputs; alternatives=true is an explanatory OR. */
+    /** needs are AND for actual inputs; alternatives=true is an explanatory OR.
+     * reference identifies the canonical producing demand, for display sharing
+     * of real or hypothetical batches. It is never resource/execute authority. */
     public record Node(String path, List<ItemStack> needs, List<ItemStack> made,
             List<ResourceLocation> recipes, boolean explanation, boolean alternatives, String reference) {
         public Node {
@@ -112,6 +115,55 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
         }
         @Override public List<ItemStack> needs() { return CraftPlan.copies(needs); }
         @Override public List<ItemStack> made() { return CraftPlan.copies(made); }
+    }
+
+    /** Optional display evidence for capped OR leaves, from the same frozen
+     * catalog as this projection. Not serialized, cached as recipe knowledge,
+     * or used as execution/review authority. Without it a capped leaf stays separate. */
+    public Map<String, Object> alternativeGroups(PlanningInput catalog) {
+        var byPath = new java.util.HashMap<String, Node>();
+        var parents = new java.util.HashSet<String>();
+        for (var node : nodes) {
+            byPath.put(node.path(), node);
+            int dot = node.path().lastIndexOf('.');
+            if (dot >= 0) parents.add(node.path().substring(0, dot));
+        }
+        var groups = new java.util.HashMap<String, Object>();
+        var keys = new java.util.IdentityHashMap<net.minecraft.world.item.crafting.Ingredient, Object>();
+        int totalOptions = 0;
+        for (var node : nodes) {
+            if (!node.alternatives() || node.needs().size() < 16 || !node.recipes().isEmpty()
+                    || !node.made().isEmpty() || parents.contains(node.path())) continue;
+            int dot = node.path().lastIndexOf('.');
+            if (dot < 0) continue;
+            var parent = byPath.get(node.path().substring(0, dot));
+            if (parent == null || parent.recipes().size() != 1) continue;
+            var entry = catalog.find(parent.recipes().getFirst());
+            if (entry == null || catalog.unavailable(entry) == CraftingResultCode.UNSUPPORTED_RECIPE) continue;
+            int slot = Integer.parseInt(node.path().substring(dot + 1));
+            for (var requirement : entry.requirements()) if (requirement.slot() == slot) {
+                var options = requirement.ingredient().getItems();
+                // Bound this optional presentation work; never truncate an
+                // identity or treat the visible prefix as the complete set.
+                if (options.length < 16 || options.length > 4096) continue;
+                var prefix = CraftPlan.stackKeys(java.util.Arrays.stream(options).limit(16)
+                        .map(s -> s.copyWithCount(1)).toList());
+                if (!new java.util.HashSet<>(prefix).equals(new java.util.HashSet<>(CraftPlan.stackKeys(
+                        node.needs().stream().map(s -> s.copyWithCount(1)).toList())))) continue;
+                var key = keys.get(requirement.ingredient());
+                if (key == null) {
+                    // The optional proof is retained with the displayed view;
+                    // cap total work/storage too, not just each Ingredient.
+                    if (options.length > MAX_ALTERNATIVE_OPTIONS - totalOptions) continue;
+                    totalOptions += options.length;
+                    key = java.util.Set.copyOf(CraftPlan.stackKeys(java.util.Arrays.stream(options)
+                            .map(s -> s.copyWithCount(1)).toList()));
+                    keys.put(requirement.ingredient(), key);
+                }
+                groups.put(node.path(), key);
+            }
+        }
+        return Map.copyOf(groups);
     }
 
     public record Operation(ResourceLocation recipe, String path, List<ItemStack> inputs,
@@ -153,6 +205,7 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
                 var node = node(nodes, step.path());
                 if (node == null) return limited(catalog);
                 node.actual = true;
+                node.fixed = true;
                 ResourceLedger.merge(node.made, step.output());
                 ResourceLedger.merge(node.remaining, step.output());
                 step.remainders().forEach(s -> ResourceLedger.merge(node.remaining, s));
@@ -163,6 +216,7 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
                     var child = node(nodes, step.path() + "." + slot);
                     if (child == null) return limited(catalog);
                     child.actual = true;
+                    child.fixed = true;
                     ResourceLedger.merge(child.needs, inputs.get(slot));
                 }
                 operations.add(new Operation(step.recipe().id(), step.path(), inputs, step.output(), step.remainders(), step.inputOrigins()));
@@ -210,7 +264,7 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
             String childPath = path + "." + requirement.slot();
             var child = node(nodes, childPath);
             if (child == null) return false;
-            if (child.actual) {
+            if (child.fixed) {
                 // A partial frontier has a producing step, but no executed
                 // root consumer yet. Supply its explanatory demand separately
                 // without inventing an operation or adding to the net costs.
@@ -219,48 +273,105 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
                 takeStock(child.remaining, requirement.ingredient(), batches);
                 continue;
             }
+            // This routine only accounts for the displayed, selected route.
+            // Hypothetical output is never an operation, extraction or stock
+            // authorization. Repeated visits add demand, not another full batch.
+            child.demanded += batches;
             child.alternatives = true;
+            child.needs.clear();
             child.needs.addAll(java.util.Arrays.stream(requirement.ingredient().getItems()).limit(16)
-                    .map(s -> s.copyWithCount(batches)).toList());
+                    .map(s -> s.copyWithCount(child.demanded)).toList());
+            var chosen = request.selections().get(childPath);
             boolean shared = false;
             for (var source : nodes.entrySet()) {
-                if (!source.getValue().actual || source.getKey().equals(childPath)) continue;
+                if (child.demanded != batches || !source.getValue().fixed || related(source.getKey(), childPath)
+                        || chosen != null && !source.getValue().recipes.contains(chosen)) continue;
                 var supplied = takeStock(source.getValue().remaining, requirement.ingredient(), batches);
                 if (!supplied.isEmpty()) {
-                    child.needs.clear(); child.needs.addAll(supplied); child.alternatives = false;
+                    child.needs.clear(); child.needs.addAll(supplied); child.alternatives = false; child.actual = true;
                     child.reference = source.getKey(); shared = true; break;
                 }
             }
             if (shared) continue;
-            var existing = takeStock(stock, requirement.ingredient(), batches);
-            if (!existing.isEmpty()) {
-                child.needs.clear(); child.needs.addAll(existing); child.alternatives = false; child.actual = true;
+            int inStock = stock.stream().filter(requirement.ingredient()::test).mapToInt(ItemStack::getCount).sum();
+            var existing = takeStock(stock, requirement.ingredient(), Math.min(batches, inStock));
+            existing.forEach(s -> ResourceLedger.merge(child.available, s));
+            int deficit = batches - existing.stream().mapToInt(ItemStack::getCount).sum();
+            if (deficit == 0 && child.hypothetical == null && child.reference.isEmpty()) {
+                child.needs.clear(); child.needs.addAll(CraftPlan.copies(child.available));
+                child.alternatives = false; child.actual = true;
                 continue; // Explanation uses available stock; it does not manufacture it again.
             }
-            var chosen = request.selections().get(childPath);
+            child.actual = false;
+            // Reuse an already selected production route before discovering an
+            // alternative. Pins on either subtree conservatively prevent sharing:
+            // changing one demand must not silently change another demand's pins.
+            Map.Entry<String, MutableNode> supply = null;
+            for (var source : nodes.entrySet()) {
+                var recipe = source.getValue().hypothetical;
+                if (recipe != null && (child.hypothetical == null || child.hypothetical.id().equals(recipe.id()))
+                        && !related(source.getKey(), childPath) && !active.contains(recipe.id())
+                        && requirement.ingredient().test(recipe.output()) && (chosen == null || chosen.equals(recipe.id()))
+                        && !hasChildSelection(request, childPath) && !hasChildSelection(request, source.getKey())) {
+                    supply = source; break;
+                }
+            }
             var producers = catalog.producing(requirement.ingredient());
             var actualRecipes = nodes.values().stream().filter(n -> n.actual).flatMap(n -> n.recipes.stream()).toList();
-            var producer = chosen == null ? producers.stream().filter(e -> !active.contains(e.id()))
+            var producer = supply != null ? supply.getValue().hypothetical : child.hypothetical != null ? child.hypothetical
+                    : chosen == null ? producers.stream().filter(e -> !active.contains(e.id()))
+                    .filter(e -> !returnsToActiveConversion(catalog, e, active))
                     .filter(e -> !conversionCycleWithoutStock(catalog, e, stock))
                     .filter(e -> !onlyReprocessesAcceptedItems(e, requirement.ingredient()))
                     .min(java.util.Comparator.<CraftingRecipes.Entry, Boolean>comparing(e -> !actualRecipes.contains(e.id()))
                             .thenComparing(CraftingRecipes.Entry::id)).orElse(null)
                     : catalog.find(chosen);
             if (producer != null && catalog.unavailable(producer) != CraftingResultCode.UNSUPPORTED_RECIPE
-                    && requirement.ingredient().test(producer.output()) && !active.contains(producer.id())) {
-                child.recipes.add(producer.id());
+                    && requirement.ingredient().test(producer.output()) && !active.contains(producer.id())
+                    && (chosen != null || !returnsToActiveConversion(catalog, producer, active))) {
+                if (!child.recipes.contains(producer.id())) child.recipes.add(producer.id());
                 // A chosen recipe fixes the output variant. Keeping the first
                 // Ingredient option here labels oak wood as oak log, or keeps
                 // an oak icon after the player selected birch planks.
                 child.needs.clear();
-                child.needs.add(producer.output().copyWithCount(batches));
+                child.available.forEach(s -> ResourceLedger.merge(child.needs, s));
+                int needed = child.demanded - child.available.stream().mapToInt(ItemStack::getCount).sum();
+                if (needed > 0) ResourceLedger.merge(child.needs, producer.output().copyWithCount(needed));
                 child.alternatives = false;
-                int upstreamBatches = (batches + producer.output().getCount() - 1) / producer.output().getCount();
-                if (!explain(catalog, request, nodes, producer, childPath, active, depth + 1, stock, upstreamBatches)) return false;
+                String sourcePath = supply == null ? childPath : supply.getKey();
+                var source = supply == null ? child : supply.getValue();
+                source.hypothetical = producer;
+                int remaining = source.remaining.stream().filter(requirement.ingredient()::test).mapToInt(ItemStack::getCount).sum();
+                int upstreamBatches = (Math.max(0, deficit - remaining) + producer.output().getCount() - 1) / producer.output().getCount();
+                if (upstreamBatches > 0) {
+                    source.hypotheticalBatches += upstreamBatches;
+                    if (source.hypotheticalBatches > SearchBudget.MAX_STEPS) return false;
+                    if (!explain(catalog, request, nodes, producer, sourcePath, active,
+                            sourcePath.split("\\.").length - 1, stock, upstreamBatches)) return false;
+                    ResourceLedger.merge(source.remaining, producer.output().copyWithCount(upstreamBatches * producer.output().getCount()));
+                }
+                takeStock(source.remaining, requirement.ingredient(), deficit);
+                if (supply != null) child.reference = sourcePath;
             }
         }
         active.remove(entry.id());
         return true;
+    }
+
+    private static boolean related(String a, String b) {
+        return a.equals(b) || a.startsWith(b + ".") || b.startsWith(a + ".");
+    }
+
+    private static boolean hasChildSelection(CraftRequest request, String path) {
+        return request.selections().keySet().stream().anyMatch(p -> p.startsWith(path + "."));
+    }
+
+    private static boolean returnsToActiveConversion(PlanningInput catalog, CraftingRecipes.Entry producer,
+            java.util.Set<ResourceLocation> active) {
+        // Reuse the solver's exact inverse definition. A default explanation
+        // must not rebuild the iron block it just proposed breaking. Actual
+        // plans and explicitly selected recipes are not pruned by this rule.
+        return active.stream().map(catalog::find).anyMatch(a -> catalog.isExactInverse(a, producer));
     }
 
     // This is only a display simplification, never a feasibility verdict. Do
@@ -317,8 +428,11 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
     private static final class MutableNode {
         final List<ItemStack> needs = new ArrayList<>(), made = new ArrayList<>();
         final List<ItemStack> remaining = new ArrayList<>();
+        final List<ItemStack> available = new ArrayList<>();
         final List<ResourceLocation> recipes = new ArrayList<>();
-        boolean actual, alternatives;
+        boolean actual, alternatives, fixed;
+        int demanded, hypotheticalBatches;
+        CraftingRecipes.Entry hypothetical;
         String reference = "";
     }
 }

@@ -240,6 +240,11 @@ public final class ClientBrowsePlanner {
 
     public static long scopeVersion() { return scopeVersion; }
 
+    /** Presentation-only full OR identity; no new query or catalog build. */
+    public static Map<String, Object> alternativeGroups(PlanView view) {
+        return ready() ? view.alternativeGroups(input) : Map.of();
+    }
+
     /** Export only the already retained, matching complete detail plan. A
      * missing/partial plan uses the existing explicit server path, not another
      * local search or a second plan cache. */

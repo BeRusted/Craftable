@@ -147,6 +147,160 @@ public final class M4DetailsGameTests {
         helper.succeed();
     }
 
+    @GameTest(templateNamespace = "minecraft", template = EMPTY)
+    public static void missingDiamondBranchesShareRoundedBatchesWithoutExecution(GameTestHelper helper) {
+        var player = M4PlanningGameTests.player(helper);
+        try {
+            var catalog = new CraftingRecipes(player, true);
+            var split = producer(catalog, Items.DIAMOND, Items.DIAMOND_BLOCK);
+            var pins = new java.util.TreeMap<String, ResourceLocation>();
+            catalog.find(ResourceLocation.withDefaultNamespace("diamond_pickaxe")).requirements().stream()
+                    .filter(r -> r.ingredient().test(new ItemStack(Items.DIAMOND)))
+                    .forEach(r -> pins.put("0." + r.slot(), split.id()));
+            for (int batches : List.of(1, 6)) for (int existing : List.of(0, 1, 4)) {
+                var req = new CraftRequest(ResourceLocation.withDefaultNamespace("diamond_pickaxe"), batches,
+                        false, false, CraftRequest.PartialPolicy.EXPLICIT_SAFE, pins);
+                var view = PlanView.from(catalog, req, org.berusted.craftable.planner.SearchResult.blocked(
+                        org.berusted.craftable.api.CraftingResultCode.MISSING_INGREDIENTS), List.of(),
+                        existing == 0 ? List.of() : List.of(new ItemStack(Items.DIAMOND, existing)));
+                int expected = (Math.max(0, batches * 3 - existing) + 8) / 9;
+                helper.assertValueEqual(view.nodes().stream().flatMap(n -> n.needs().stream())
+                        .filter(s -> s.is(Items.DIAMOND_BLOCK)).mapToInt(ItemStack::getCount).sum(), expected,
+                        "per-demand rounding duplicated diamond blocks (batches=" + batches + ", existing=" + existing + ")");
+                helper.assertValueEqual(view.nodes().stream().filter(n -> pins.containsKey(n.path()))
+                        .flatMap(n -> n.needs().stream()).filter(s -> s.is(Items.DIAMOND)).mapToInt(ItemStack::getCount).sum(),
+                        batches * 3, "shared production lost individual diamond demands");
+                helper.assertTrue(view.operations().isEmpty() && view.consumed().isEmpty() && view.primary().isEmpty()
+                        && view.code() == org.berusted.craftable.api.CraftingResultCode.MISSING_INGREDIENTS,
+                        "hypothetical batch authorized execution");
+                if (batches == 1 && existing == 0) helper.assertValueEqual(view.nodes().stream()
+                        .filter(n -> pins.containsKey(n.path()) && !n.reference().isEmpty()).count(), 2L, "shared demands lost references");
+            }
+        } finally { M4PlanningGameTests.remove(player); }
+        helper.succeed();
+    }
+
+    @GameTest(templateNamespace = "minecraft", template = EMPTY)
+    public static void repeaterExplanationSharesBlockAcrossTreeDepths(GameTestHelper helper) {
+        var player = M4PlanningGameTests.player(helper);
+        try {
+            var catalog = new CraftingRecipes(player, true);
+            var split = producer(catalog, Items.REDSTONE, Items.REDSTONE_BLOCK);
+            var pins = redstonePins(catalog, split.id());
+            var req = new CraftRequest(ResourceLocation.withDefaultNamespace("repeater"), 1,
+                    false, false, CraftRequest.PartialPolicy.EXPLICIT_SAFE, pins);
+            var view = PlanView.from(catalog, req, org.berusted.craftable.planner.SearchResult.blocked(
+                    org.berusted.craftable.api.CraftingResultCode.MISSING_INGREDIENTS), List.of(),
+                    List.of(new ItemStack(Items.STICK, 2), new ItemStack(Items.STONE, 3)));
+            helper.assertValueEqual(view.nodes().stream().flatMap(n -> n.needs().stream())
+                    .filter(s -> s.is(Items.REDSTONE_BLOCK)).mapToInt(ItemStack::getCount).sum(), 1,
+                    "torch and direct dust demands duplicated a redstone block");
+            helper.assertValueEqual(view.nodes().stream().filter(n -> n.recipes().contains(split.id()))
+                    .flatMap(n -> n.needs().stream()).filter(s -> s.is(Items.REDSTONE)).mapToInt(ItemStack::getCount).sum(), 3,
+                    "three dust demands lost their quantities");
+            helper.assertTrue(view.operations().isEmpty() && view.consumed().isEmpty(), "missing block fabricated real steps");
+            var boat = PlanView.from(catalog, request("oak_boat"), org.berusted.craftable.planner.SearchResult.blocked(
+                    org.berusted.craftable.api.CraftingResultCode.MISSING_INGREDIENTS), List.of());
+            helper.assertValueEqual(boat.nodes().stream().flatMap(n -> n.needs().stream())
+                    .filter(s -> s.is(Items.OAK_LOG)).mapToInt(ItemStack::getCount).sum(), 2,
+                    "five plank demands should use two batches, not five logs");
+        } finally { M4PlanningGameTests.remove(player); }
+        helper.succeed();
+    }
+
+    @GameTest(templateNamespace = "minecraft", template = EMPTY)
+    public static void sharedBlockPlansKeepExactTransactionCostsAndSurplus(GameTestHelper helper) {
+        for (String target : List.of("diamond_pickaxe", "repeater")) {
+            var player = M4PlanningGameTests.player(helper);
+            var block = target.equals("repeater") ? Items.REDSTONE_BLOCK : Items.DIAMOND_BLOCK;
+            var loose = target.equals("repeater") ? Items.REDSTONE : Items.DIAMOND;
+            var output = target.equals("repeater") ? Items.REPEATER : Items.DIAMOND_PICKAXE;
+            var source = new net.minecraft.world.SimpleContainer(new ItemStack(block), new ItemStack(Items.STICK, 2),
+                    target.equals("repeater") ? new ItemStack(Items.STONE, 3) : ItemStack.EMPTY);
+            try {
+                var result = M4PlanningGameTests.search(player, target, 1, false, true,
+                        List.of(source.getItem(0), source.getItem(1), source.getItem(2)).stream()
+                                .filter(s -> !s.isEmpty()).toArray(ItemStack[]::new));
+                var plan = result.plan().orElseThrow(() -> new AssertionError(result));
+                var view = PlanView.from(new CraftingRecipes(player, true), request(target), result, List.of());
+                helper.assertValueEqual(M4PlanningGameTests.count(view.consumed(), block), 1, "actual block cost");
+                helper.assertValueEqual(M4PlanningGameTests.count(plan.surplus(), loose), 6, "shared batch surplus");
+                var snapshot = M4TransactionGameTests.snapshot(player, source);
+                var delivery = MainInventoryInsertion.simulate(player.getInventory(), plan, snapshot, false);
+                helper.assertValueEqual(CraftingTransaction.execute(player, plan, snapshot, delivery),
+                        org.berusted.craftable.api.CraftingResultCode.CREATED, "shared batch transaction");
+                helper.assertTrue(source.isEmpty(), "transaction left input behind");
+                helper.assertValueEqual(player.getInventory().countItem(output), 1, "target quantity");
+                helper.assertValueEqual(player.getInventory().countItem(loose), 6, "transaction lost surplus");
+            } finally { M4PlanningGameTests.remove(player); }
+        }
+        helper.succeed();
+    }
+
+    @GameTest(templateNamespace = "minecraft", template = EMPTY)
+    public static void defaultExplanationStopsInverseButKeepsExplicitAndRealConversion(GameTestHelper helper) {
+        var player = M4PlanningGameTests.player(helper);
+        try {
+            var catalog = new CraftingRecipes(player, true);
+            var split = producer(catalog, Items.IRON_INGOT, Items.IRON_BLOCK);
+            var pins = new java.util.TreeMap<String, ResourceLocation>();
+            catalog.find(ResourceLocation.withDefaultNamespace("iron_pickaxe")).requirements().stream()
+                    .filter(r -> r.ingredient().test(new ItemStack(Items.IRON_INGOT)))
+                    .forEach(r -> pins.put("0." + r.slot(), split.id()));
+            var req = new CraftRequest(ResourceLocation.withDefaultNamespace("iron_pickaxe"), 1,
+                    false, false, CraftRequest.PartialPolicy.EXPLICIT_SAFE, pins);
+            var blocked = org.berusted.craftable.planner.SearchResult.blocked(
+                    org.berusted.craftable.api.CraftingResultCode.MISSING_INGREDIENTS);
+            var view = PlanView.from(catalog, req, blocked, List.of(), List.of(new ItemStack(Items.STICK, 2)));
+            helper.assertValueEqual(view.nodes().stream().flatMap(n -> n.needs().stream())
+                    .filter(s -> s.is(Items.IRON_BLOCK)).mapToInt(ItemStack::getCount).sum(), 1, "missing block rounded twice");
+            helper.assertTrue(view.nodes().stream().noneMatch(n -> n.recipes().contains(ResourceLocation.withDefaultNamespace("iron_block"))),
+                    "default display rebuilt the block it proposed breaking");
+            helper.assertTrue(view.operations().isEmpty() && view.consumed().isEmpty(), "explanation authorized a conversion");
+            var source = view.nodes().stream().filter(n -> n.needs().stream().anyMatch(s -> s.is(Items.IRON_BLOCK)))
+                    .findFirst().orElseThrow();
+            pins.put(source.path(), ResourceLocation.withDefaultNamespace("iron_block"));
+            var explicit = PlanView.from(catalog, new CraftRequest(req.recipe(), 1, false, false,
+                    CraftRequest.PartialPolicy.EXPLICIT_SAFE, pins), blocked, List.of());
+            helper.assertTrue(explicit.nodes().stream().anyMatch(n -> n.path().equals(source.path())
+                    && n.recipes().contains(ResourceLocation.withDefaultNamespace("iron_block"))),
+                    "default simplification suppressed explicit block choice");
+            for (String target : List.of("iron_pickaxe", "iron_block")) {
+                var result = M4PlanningGameTests.search(player, target, 1, false, true,
+                        target.equals("iron_block") ? new ItemStack(Items.IRON_INGOT, 9) : new ItemStack(Items.IRON_BLOCK),
+                        new ItemStack(Items.STICK, 2));
+                helper.assertTrue(result.plan().isPresent(), "real conversion was incorrectly pruned: " + target);
+                var real = PlanView.from(catalog, request(target), result, List.of());
+                helper.assertTrue(real.operations().stream().anyMatch(o -> o.recipe().equals(
+                        target.equals("iron_block") ? ResourceLocation.withDefaultNamespace("iron_block") : split.id())),
+                        "display hid executable conversion");
+            }
+        } finally { M4PlanningGameTests.remove(player); }
+        helper.succeed();
+    }
+
+    private static org.berusted.craftable.recipe.CraftingRecipes.Entry producer(CraftingRecipes catalog,
+            net.minecraft.world.item.Item output, net.minecraft.world.item.Item input) {
+        return catalog.producing(net.minecraft.world.item.crafting.Ingredient.of(output)).stream()
+                .filter(e -> e.requirements().size() == 1 && e.requirements().getFirst().ingredient().test(new ItemStack(input)))
+                .findFirst().orElseThrow();
+    }
+
+    private static java.util.Map<String, ResourceLocation> redstonePins(CraftingRecipes catalog, ResourceLocation split) {
+        var pins = new java.util.TreeMap<String, ResourceLocation>();
+        var torch = catalog.find(ResourceLocation.withDefaultNamespace("redstone_torch"));
+        for (var r : catalog.find(ResourceLocation.withDefaultNamespace("repeater")).requirements()) {
+            String path = "0." + r.slot();
+            if (r.ingredient().test(new ItemStack(Items.REDSTONE))) pins.put(path, split);
+            else if (r.ingredient().test(new ItemStack(Items.REDSTONE_TORCH))) {
+                pins.put(path, torch.id());
+                torch.requirements().stream().filter(t -> t.ingredient().test(new ItemStack(Items.REDSTONE)))
+                        .forEach(t -> pins.put(path + "." + t.slot(), split));
+            }
+        }
+        return pins;
+    }
+
     private static CraftRequest request(String id) {
         return CraftRequest.one(ResourceLocation.withDefaultNamespace(id));
     }

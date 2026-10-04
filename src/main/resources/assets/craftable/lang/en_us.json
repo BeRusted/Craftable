@@ -127,6 +127,7 @@
   "screen.craftable.plan.need": "Needs %s × %s",
   "screen.craftable.plan.made": "Makes %s × %s",
   "screen.craftable.plan.shared": "Used in %s places",
+  "screen.craftable.plan.shared_batch": "Uses shared crafting output",
   "screen.craftable.plan.recipe_inputs": "Ingredients",
   "screen.craftable.plan.input_options": "%s × (%s; any mix)",
   "screen.craftable.plan.recipe_outputs": "Result"

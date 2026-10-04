@@ -72,6 +72,7 @@ public final class CraftingPlanOverlay extends Screen {
     private Button create;
     private RefreshButton refresh;
     private PlanView displayedView;
+    private Map<String, Object> displayedAlternativeGroups = Map.of();
     private final List<Component> rows = new ArrayList<>();
     private final List<net.minecraft.util.FormattedCharSequence> wrappedRows = new ArrayList<>();
     private Component notice = Component.empty();
@@ -118,7 +119,7 @@ public final class CraftingPlanOverlay extends Screen {
         int available = Math.max(180, width - 28);
         int sliderWidth = available * 65 / 100;
         graph = addRenderableWidget(new PlanGraphWidget(14, 14, available, Math.max(30, height - 76), this::choose));
-        if (displayedView != null) graph.show(displayedView);
+        if (displayedView != null) graph.show(displayedView, displayedAlternativeGroups);
         graph.visible = pane == Pane.GRAPH;
         slider = addRenderableWidget(new CountSlider(14, height - 34, sliderWidth));
         create = button(18 + sliderWidth, height - 34, available - sliderWidth - 4, text("create"), this::act);
@@ -428,13 +429,14 @@ public final class CraftingPlanOverlay extends Screen {
                     ClientBrowsePlanner.outputChoices(self.draft.view(), self.intent, self.outputVariants));
         }
         self.displayedView = self.draft.view();
+        self.displayedAlternativeGroups = local ? ClientBrowsePlanner.alternativeGroups(self.displayedView) : Map.of();
         if (work != Work.AUTHORIZE) self.submittedWitness = null;
         self.localDraft = local;
         var route = payload.draft().view().operations().stream().map(o -> (Object) List.of(o.path(), o.recipe())).distinct().toList();
         if (self.intent.batches() == 1 && self.singleRoute.isEmpty()) self.singleRoute = route;
         self.routeChanged = !self.singleRoute.isEmpty() && !self.singleRoute.equals(route)
                 || payload.draft().view().nodes().stream().anyMatch(n -> n.recipes().size() > 1);
-        self.graph.show(self.draft.view());
+        self.graph.show(self.draft.view(), self.displayedAlternativeGroups);
         self.slider.syncValue();
         self.rebuildRows();
         self.controls();

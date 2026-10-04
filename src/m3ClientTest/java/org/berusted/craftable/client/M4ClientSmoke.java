@@ -351,12 +351,30 @@ public final class M4ClientSmoke {
                     }
                 }
                 require(materialIds.size() >= 2 && deviation, "Mixed graph missing oak/birch branches or deviation badge");
+                for (int i = 0; i < cells.size(); i++) for (int j = i + 1; j < cells.size(); j++) {
+                    var a = cells.get(i); var b = cells.get(j);
+                    if (field(a, "x").equals(field(b, "x")))
+                        require(Math.abs((int) field(a, "y") - (int) field(b, "y")) >= 26,
+                                "Shared mixed supplies overlap in the same column");
+                }
+                // Mixed material allocations are not equivalent fixed-output
+                // demands. Check their total needs and real production rather
+                // than inferring quantities from the number of display nodes.
+                int plankNeeds = 0, plankMade = 0;
                 boolean connected = false;
+                for (var cell : cells) {
+                    for (var stack : (List<ItemStack>) field(cell, "needs"))
+                        if (stack.is(Items.OAK_PLANKS) || stack.is(Items.BIRCH_PLANKS)) plankNeeds += stack.getCount();
+                    for (var stack : (List<ItemStack>) field(cell, "made"))
+                        if (stack.is(Items.OAK_PLANKS) || stack.is(Items.BIRCH_PLANKS)) plankMade += stack.getCount();
+                }
+                require(plankNeeds == 12 && plankMade == 12, "Mixed shared demands lost total needs or real production");
                 for (var cell : cells) if (((List<?>) field(cell, "children")).containsAll(materialIds)) {
                     connected = true;
                     var icon = PlanGraphWidget.class.getDeclaredMethod("icon", cell.getClass());
                     icon.setAccessible(true);
-                    require(((ItemStack) icon.invoke(null, cell)).getCount() == 12, "Mixed plank icon hides another material's count");
+                    int demand = ((List<ItemStack>) field(cell, "needs")).stream().mapToInt(ItemStack::getCount).sum();
+                    require(((ItemStack) icon.invoke(null, cell)).getCount() == demand, "Mixed plank icon hides another material's count");
                 }
                 require(connected, "Mixed inputs not connected to shared production node");
                 shot("mixed-graph");

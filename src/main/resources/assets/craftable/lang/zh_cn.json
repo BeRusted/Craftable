@@ -127,6 +127,7 @@
   "screen.craftable.plan.need": "需要 %s × %s",
   "screen.craftable.plan.made": "将合成 %s × %s",
   "screen.craftable.plan.shared": "用于 %s 处",
+  "screen.craftable.plan.shared_batch": "共用合成产物",
   "screen.craftable.plan.recipe_inputs": "所需材料",
   "screen.craftable.plan.input_options": "%s ×（%s，可混用）",
   "screen.craftable.plan.recipe_outputs": "合成结果"

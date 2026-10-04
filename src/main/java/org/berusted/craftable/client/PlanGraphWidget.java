@@ -15,16 +15,19 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import org.berusted.craftable.planner.CraftPlan;
 import org.berusted.craftable.planner.PlanView;
+import org.berusted.craftable.client.PlanGraphRouting.Link;
 
 /** Small bounded layout/renderer. It consumes a projection and never computes craftability. */
 final class PlanGraphWidget extends AbstractWidget {
     private final List<Cell> cells = new ArrayList<>();
     private final Map<String, Cell> byId = new HashMap<>();
+    private final List<Link> connections = new ArrayList<>();
     private final Consumer<List<String>> select;
     private final java.util.Set<String> collapsed = new java.util.HashSet<>();
     private int focusedCell;
     private int panX, panY;
     private PlanView view;
+    private Map<String, Object> alternativeGroups = Map.of();
 
     PlanGraphWidget(int x, int y, int width, int height, Consumer<List<String>> select) {
         super(x, y, width, height, Component.translatable("screen.craftable.plan.graph"));
@@ -32,61 +35,85 @@ final class PlanGraphWidget extends AbstractWidget {
     }
 
     void show(PlanView view) {
+        show(view, this.view == view ? alternativeGroups : Map.of());
+    }
+
+    void show(PlanView view, Map<String, Object> alternativeGroups) {
         boolean updating = this.view != null;
-        int previousX = panX, previousY = panY, previousFocus = focusedCell;
+        int previousX = panX, previousY = panY;
+        String previousFocus = cells.isEmpty() ? "" : cells.get(focusedCell).id;
         this.view = view;
+        this.alternativeGroups = Map.copyOf(alternativeGroups);
         layout();
         if (updating) {
             // Resource renewal updates the projection, not the player's view.
             panX = previousX; panY = previousY;
-            focusedCell = Math.min(previousFocus, Math.max(0, cells.size() - 1));
+            focus(previousFocus);
         }
     }
 
     private void layout() {
         cells.clear();
         byId.clear();
+        connections.clear();
         if (view == null) return;
-        var aliases = new HashMap<String, String>();
         var raw = new LinkedHashMap<String, PlanView.Node>();
         view.nodes().stream().sorted(java.util.Comparator.comparing(PlanView.Node::path))
                 .forEach(n -> raw.put(n.path(), n));
         var references = new HashMap<String, java.util.Set<String>>();
+        var sources = new HashMap<String, String>();
         for (var op : view.operations()) for (int i = 0; i < op.inputs().size(); i++) {
             int origin = op.inputOrigins().get(i);
             if (origin >= 0) references.computeIfAbsent(op.path() + "." + i, ignored -> new java.util.HashSet<>())
                     .add(view.operations().get(origin).path());
         }
-        // Merge only proven same-batch references, not merely matching icons.
-        // Keep mixed/ambiguous references separate and expose the exact steps.
+        // Resolve shared supply before merging equivalent sibling demands.
+        // Equal icons alone never prove shared stock.
         references.forEach((path, producers) -> {
             if (producers.size() != 1 || !raw.containsKey(path) || !raw.get(path).made().isEmpty()) return;
             String producer = producers.iterator().next();
             if (producer.compareTo(path) >= 0 || !raw.containsKey(producer) || path.startsWith(producer + ".")
                     || producer.startsWith(path + ".")) return;
             if (raw.get(path).needs().stream().allMatch(s -> raw.get(producer).made().stream()
-                    .anyMatch(p -> ItemStack.isSameItemSameComponents(s, p)))) aliases.put(path, producer);
+                    .anyMatch(p -> ItemStack.isSameItemSameComponents(s, p)))) sources.put(path, producer);
         });
         for (var node : raw.values()) if (!node.reference().isEmpty() && raw.containsKey(node.reference())
                 && !node.reference().startsWith(node.path() + ".") && !node.path().startsWith(node.reference() + "."))
-            aliases.put(node.path(), node.reference());
-        mergeEquivalentBranches(raw, aliases);
+            sources.put(node.path(), node.reference());
         var grouped = new LinkedHashMap<String, Cell>();
         for (var n : raw.values()) {
-            String id = resolve(n.path(), aliases);
+            String id = n.path();
             var cell = grouped.computeIfAbsent(id, ignored -> new Cell(id));
+            cell.owner = parent(n.path());
+            cell.supply = sources.containsKey(n.path()) ? resolve(sources.get(n.path()), sources)
+                    : sources.containsValue(n.path()) ? n.path() : "";
             cell.paths.add(n.path());
             n.needs().forEach(s -> merge(cell.needs, s));
             n.made().forEach(s -> merge(cell.made, s));
             for (var recipe : n.recipes()) if (!cell.recipes.contains(recipe.toString())) cell.recipes.add(recipe.toString());
             cell.explanation |= n.explanation();
             cell.alternatives |= n.alternatives();
+            cell.alternativesKey = alternativeGroups.get(n.path());
+            cell.sharedBatch |= sources.containsKey(n.path()) || sources.containsValue(n.path());
         }
         for (var n : raw.values()) {
-            String id = resolve(n.path(), aliases), parent = resolve(parent(n.path()), aliases);
+            String id = n.path(), parent = parent(n.path());
             if (!id.equals(parent) && grouped.containsKey(parent) && !grouped.get(parent).children.contains(id))
                 grouped.get(parent).children.add(id);
         }
+        for (var source : sources.entrySet()) {
+            String demandId = source.getKey(), producerId = resolve(source.getValue(), sources);
+            var demand = grouped.get(demandId);
+            var producer = grouped.get(producerId);
+            if (demand == null || producer == null || producer.children.isEmpty()) continue;
+            for (String recipe : producer.recipes) if (!demand.recipes.contains(recipe)) demand.recipes.add(recipe);
+            // The source's input quantities already cover all consumers. Do
+            // not copy or sum them again, and never turn references into cycles.
+            for (String input : producer.children)
+                if (!demand.children.contains(input) && !reaches(input, demandId, grouped, new java.util.HashSet<>()))
+                    demand.children.add(input);
+        }
+        mergeSiblingDemands(grouped);
         // Different real materials across batches are AND inputs, not an
         // animated OR icon. Split actual mixed leaves for display only; all
         // variants retain authoritative paths. Operations remain executable.
@@ -100,6 +127,7 @@ final class PlanGraphWidget extends AbstractWidget {
                 variant.paths.addAll(cell.paths);
                 variant.needs.add(cell.needs.get(i).copy());
                 variant.explanation = cell.explanation;
+                variant.owner = cell.owner;
                 variant.deviation = true;
                 grouped.put(variant.id, variant); variants.add(variant.id);
             }
@@ -111,25 +139,185 @@ final class PlanGraphWidget extends AbstractWidget {
             }
         }
         collapsed.retainAll(grouped.keySet());
-        int[] row = {0};
-        place("0", grouped, new java.util.HashSet<>(), row);
+        layer(grouped);
+        for (var cell : grouped.values()) for (String child : cell.children)
+            if (grouped.containsKey(child)) grouped.get(child).parents.add(cell.id);
+        arrange(grouped);
         if (!cells.isEmpty()) {
-            int min = cells.stream().mapToInt(c -> c.y).min().orElse(0);
-            int max = cells.stream().mapToInt(c -> c.y).max().orElse(0);
+            int min = Math.min(cells.stream().mapToInt(c -> c.y).min().orElse(0), connections.stream()
+                    .flatMap(l -> l.segments().stream()).mapToInt(s -> Math.min(s.y1(), s.y2())).min().orElse(0));
+            int max = Math.max(cells.stream().mapToInt(c -> c.y + 26).max().orElse(0), connections.stream()
+                    .flatMap(l -> l.segments().stream()).mapToInt(s -> Math.max(s.y1(), s.y2())).max().orElse(0));
             // Center the occupied bounds, including the icon height, rather
             // than the root's top edge (which clips lower leaves at GUI scale 2).
-            panY = (height - (max - min + 26)) / 2 - min;
+            panY = (height - (max - min)) / 2 - min;
         }
-        cells.forEach(c -> byId.put(c.id, c));
         focusedCell = Math.min(focusedCell, Math.max(0, cells.size() - 1));
+    }
+
+    private void separateRows() {
+        // Mixed supplies can have identical consumers and therefore identical
+        // desired centers. Keep every material visible/clickable, while keeping
+        // the occupied column centered near those desired positions.
+        var columns = new java.util.TreeMap<Integer, List<Cell>>();
+        for (var cell : cells) columns.computeIfAbsent(cell.x, ignored -> new ArrayList<>()).add(cell);
+        for (var column : columns.values()) {
+            column.sort(java.util.Comparator.<Cell>comparingInt(c -> c.y).thenComparing(c -> c.id));
+            int desired = column.stream().mapToInt(c -> c.y).sum();
+            int next = column.getFirst().y;
+            for (var cell : column) { cell.y = Math.max(cell.y, next); next = cell.y + 40; }
+            int shift = (desired - column.stream().mapToInt(c -> c.y).sum()) / column.size();
+            column.forEach(c -> c.y += shift);
+        }
+    }
+
+    private List<List<Cell>> sharedDemands() {
+        var groups = new LinkedHashMap<Object, List<Cell>>();
+        for (var cell : cells) if (!cell.supply.isEmpty() && cell.needs.size() == 1 && !cell.alternatives
+                && !collapsed.contains(cell.id) && cell.recipes.size() == 1 && !cell.children.isEmpty()
+                && cell.children.stream().allMatch(byId::containsKey)) {
+            var key = List.of(cell.supply, cell.recipes, CraftPlan.stackKeys(List.of(cell.needs.getFirst().copyWithCount(1))));
+            groups.computeIfAbsent(key, ignored -> new ArrayList<>()).add(cell);
+        }
+        return groups.values().stream().filter(g -> g.size() >= 2 && g.size() <= 8
+                && g.stream().allMatch(c -> c.children.equals(g.getFirst().children))).limit(8).toList();
+    }
+
+    private void arrange(Map<String, Cell> grouped) {
+        grouped.values().forEach(c -> c.column = c.depth);
+        position(grouped, List.of());
+        var groups = sharedDemands();
+        var best = geometryScore(groups);
+        var saved = positions();
+        for (var group : groups) {
+            int column = group.stream().mapToInt(c -> c.depth).max().orElseThrow();
+            group.forEach(c -> c.column = column);
+        }
+        position(grouped, groups);
+        var aligned = geometryScore(groups);
+        if (aligned.compareTo(best) <= 0) best = aligned;
+        else restore(saved);
+        // Bounded sibling swaps (adjacent first), not a global graph
+        // optimizer. Each trial uses exactly the same positioning and router.
+        int trials = 0, limit = cells.size() <= 64 ? 16 : 4;
+        for (var parent : List.copyOf(cells)) {
+            if (collapsed.contains(parent.id) || parent.children.size() > 8) continue;
+            for (int span = 1; span < parent.children.size() && trials < limit; span++)
+            for (int i = 0; i + span < parent.children.size() && trials < limit; i++, trials++) {
+                saved = positions();
+                java.util.Collections.swap(parent.children, i, i + span);
+                position(grouped, groups);
+                var score = geometryScore(groups);
+                if (score.compareTo(best) < 0) best = score;
+                else {
+                    java.util.Collections.swap(parent.children, i, i + span);
+                    restore(saved);
+                }
+            }
+            if (trials >= limit) break;
+        }
+    }
+
+    private void position(Map<String, Cell> grouped, List<List<Cell>> groups) {
+        cells.clear(); byId.clear();
+        place("0", grouped, new java.util.HashSet<>(), new int[]{0});
+        cells.forEach(c -> byId.put(c.id, c));
+        // Pack each column only once, then settle unique one-input chains.
+        // Shared inputs remain between consumers; they never consume a row
+        // merely because they have been visited before.
+        separateRows();
+        for (var group : groups) {
+            if (group.stream().map(c -> c.x).distinct().count() != 1) continue;
+            int x = group.getFirst().x;
+            var column = cells.stream().filter(c -> c.x == x)
+                    .sorted(java.util.Comparator.<Cell>comparingInt(c -> c.y).thenComparing(c -> c.id)).toList();
+            var members = group.stream().sorted(java.util.Comparator.<Cell>comparingInt(c -> c.y).thenComparing(c -> c.id)).toList();
+            int end = members.stream().mapToInt(c -> c.y).max().orElseThrow();
+            var ordered = new ArrayList<>(column.stream().filter(c -> !group.contains(c)).toList());
+            int at = (int) ordered.stream().filter(c -> c.y <= end).count();
+            ordered.addAll(at, members);
+            int y = column.getFirst().y;
+            for (var c : ordered) { c.y = y; y += 40; }
+        }
+        for (int pass = 0; pass < 2; pass++) for (var c : cells) {
+            if (c.parents.size() > 1) moveRow(c, (int) c.parents.stream().map(byId::get)
+                    .filter(java.util.Objects::nonNull).mapToInt(p -> p.y).average().orElse(c.y));
+            if (!collapsed.contains(c.id) && c.children.size() > 1) {
+                var ys = c.children.stream().map(byId::get).filter(java.util.Objects::nonNull)
+                        .mapToInt(child -> child.y).sorted().toArray();
+                if (ys.length > 1) moveRow(c, (ys[(ys.length - 1) / 2] + ys[ys.length / 2]) / 2);
+            }
+            if (!collapsed.contains(c.id) && c.children.size() == 1) {
+                var child = byId.get(c.children.getFirst());
+                if (child != null && child.parents.size() == 1) {
+                    if (!moveRow(child, c.y)) moveRow(c, child.y);
+                }
+            }
+        }
+        routeConnections();
+    }
+
+    private boolean moveRow(Cell cell, int y) {
+        if (cells.stream().anyMatch(c -> c != cell && c.x == cell.x && Math.abs(c.y - y) < 40)) return false;
+        cell.y = y; return true;
+    }
+
+    private record LayoutSnapshot(List<Cell> order, List<int[]> positions, List<Link> connections) {}
+
+    private LayoutSnapshot positions() {
+        // Save keyboard traversal too: a rejected trial cannot reorder focus.
+        return new LayoutSnapshot(List.copyOf(cells), cells.stream().sorted(java.util.Comparator.comparing(c -> c.id))
+                .map(c -> new int[]{c.x, c.y, c.column}).toList(), List.copyOf(connections));
+    }
+
+    private void restore(LayoutSnapshot saved) {
+        cells.clear(); cells.addAll(saved.order());
+        var ordered = cells.stream().sorted(java.util.Comparator.comparing(c -> c.id)).toList();
+        for (int i = 0; i < ordered.size(); i++) {
+            var c = ordered.get(i); var p = saved.positions().get(i);
+            c.x = p[0]; c.y = p[1]; c.column = p[2];
+        }
+        connections.clear(); connections.addAll(saved.connections());
+    }
+
+    private SceneScore geometryScore(List<List<Cell>> groups) {
+        var score = PlanGraphRouting.score(routingNodes(), connections);
+        int overlaps = 0;
+        for (int i = 0; i < cells.size(); i++) for (int j = i + 1; j < cells.size(); j++) {
+            var a = cells.get(i); var b = cells.get(j);
+            if (Math.abs(a.x - b.x) < 28 && Math.abs(a.y - b.y) < 28) overlaps++;
+        }
+        long separation = 0;
+        for (var group : groups) {
+            int left = group.stream().mapToInt(c -> c.x).min().orElseThrow();
+            int low = group.stream().mapToInt(c -> c.y).min().orElseThrow();
+            int high = group.stream().mapToInt(c -> c.y).max().orElseThrow();
+            separation += group.stream().mapToInt(c -> c.x - left).sum() * 4L
+                    + Math.max(0, high - low - (group.size() - 1) * 40) * 2L;
+        }
+        long chain = 0;
+        for (var c : cells) if (c.children.size() == 1 && !collapsed.contains(c.id)) {
+            var child = byId.get(c.children.getFirst());
+            if (child != null && child.parents.size() == 1) chain += Math.abs(child.y - c.y) * 2L;
+        }
+        return new SceneScore(overlaps + score.hits(), score.overlaps(), score.contacts(),
+                score.outside() * 160L + score.length() + score.bends() * 12L + score.crossings() * 8L + separation + chain);
+    }
+
+    private record SceneScore(int hits, int overlaps, int contacts, long cost) implements Comparable<SceneScore> {
+        @Override public int compareTo(SceneScore other) {
+            int value = Integer.compare(hits, other.hits);
+            if (value == 0) value = Integer.compare(overlaps, other.overlaps);
+            if (value == 0) value = Integer.compare(contacts, other.contacts);
+            return value == 0 ? Long.compare(cost, other.cost) : value;
+        }
     }
 
     private int place(String id, Map<String, Cell> grouped, java.util.Set<String> seen, int[] row) {
         var cell = grouped.get(id);
         if (cell == null) return row[0] * 40;
         if (!seen.add(id)) return cell.y;
-        int depth = cell.paths.getFirst().split("\\.").length - 1;
-        cell.x = width - 42 - depth * 64;
+        cell.x = width - 42 - cell.column * 64;
         var visibleChildren = collapsed.contains(id) ? List.<String>of() : cell.children;
         if (visibleChildren.isEmpty()) cell.y = row[0]++ * 40;
         else {
@@ -139,6 +327,84 @@ final class PlanGraphWidget extends AbstractWidget {
         }
         cells.add(cell);
         return cell.y;
+    }
+
+    private static boolean reaches(String from, String target, Map<String, Cell> grouped, java.util.Set<String> seen) {
+        if (from.equals(target)) return true;
+        var cell = grouped.get(from);
+        if (cell == null || !seen.add(from)) return false;
+        return cell.children.stream().anyMatch(c -> reaches(c, target, grouped, seen));
+    }
+
+    private static void layer(Map<String, Cell> grouped) {
+        // Longest dependency depth makes every source lie to the left of every
+        // consumer, including references crossing the original tree depths.
+        // Display alignment cannot change graph depth or dependencies.
+        for (int pass = 0; pass < grouped.size(); pass++) {
+            boolean changed = false;
+            for (var cell : grouped.values()) for (String id : cell.children) {
+                var child = grouped.get(id);
+                if (child != null && child.depth <= cell.depth) { child.depth = cell.depth + 1; changed = true; }
+            }
+            if (!changed) return;
+        }
+    }
+
+    private static void mergeSiblingDemands(Map<String, Cell> grouped) {
+        // Merge demand quantities only, after resolving shared supply edges.
+        // Never recursively sum a shared source or derive new crafting costs.
+        var aliases = new HashMap<String, String>();
+        for (int pass = 0; pass < PlanView.MAX_NODES; pass++) {
+            var shapes = new HashMap<String, Object>();
+            var first = new HashMap<Object, Cell>();
+            var removed = new java.util.HashSet<String>();
+            for (var cell : grouped.values()) {
+                Object shape = demandShape(cell.id, grouped, shapes, new java.util.HashSet<>());
+                if (cell.id.equals("0") || shape == null) continue;
+                var previous = first.putIfAbsent(List.of(resolve(cell.owner, aliases), shape), cell);
+                if (previous == null) continue;
+                if (reaches(cell.id, previous.id, grouped, new java.util.HashSet<>())
+                        || reaches(previous.id, cell.id, grouped, new java.util.HashSet<>())) continue;
+                aliases.put(cell.id, previous.id); removed.add(cell.id);
+                previous.paths.addAll(cell.paths);
+                cell.needs.forEach(s -> merge(previous.needs, s));
+                cell.made.forEach(s -> merge(previous.made, s));
+                previous.sharedBatch |= cell.sharedBatch;
+                if (!previous.supply.equals(cell.supply)) previous.supply = "";
+                for (String child : cell.children) if (!previous.children.contains(child)) previous.children.add(child);
+            }
+            if (removed.isEmpty()) return;
+            removed.forEach(grouped::remove);
+            for (var cell : grouped.values()) {
+                cell.owner = resolve(cell.owner, aliases);
+                cell.supply = resolve(cell.supply, aliases);
+                var children = cell.children.stream().map(c -> resolve(c, aliases)).distinct().toList();
+                cell.children.clear(); cell.children.addAll(children);
+            }
+        }
+    }
+
+    private static Object demandShape(String id, Map<String, Cell> grouped, Map<String, Object> shapes,
+            java.util.Set<String> active) {
+        if (shapes.containsKey(id)) return shapes.get(id);
+        var cell = grouped.get(id);
+        if (cell == null || !active.add(id) || cell.needs.isEmpty()
+                || !cell.alternatives && cell.needs.size() > 1
+                || cell.alternatives && (!cell.children.isEmpty() || !cell.recipes.isEmpty()
+                        || !cell.made.isEmpty() || cell.needs.size() >= 16 && cell.alternativesKey == null)) return null;
+        var children = new ArrayList<Object>();
+        for (String child : cell.children) {
+            Object shape = demandShape(child, grouped, shapes, active);
+            if (shape == null) { active.remove(id); return null; }
+            children.add(shape);
+        }
+        active.remove(id);
+        Object materials = cell.alternatives && cell.alternativesKey != null ? cell.alternativesKey
+                : new java.util.HashSet<>(CraftPlan.stackKeys(cell.needs.stream().map(s -> s.copyWithCount(1)).toList()));
+        Object result = List.of(materials,
+                cell.recipes, cell.explanation, cell.alternatives, children);
+        shapes.put(id, result);
+        return result;
     }
 
     @Override protected void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
@@ -181,22 +447,27 @@ final class PlanGraphWidget extends AbstractWidget {
     }
 
     private void drawConnections(GuiGraphics g, boolean outline) {
-        for (var cell : cells) if (!collapsed.contains(cell.id)) for (String childId : cell.children) {
-            var child = byId.get(childId);
-            if (child == null) continue;
-            int x1 = x(child) + 13, y1 = y(child) + 13, x2 = x(cell) + 13, y2 = y(cell) + 13;
-            int bend = (x1 + x2) / 2;
-            if (outline) {
-                g.fill(x1, y1 - 1, bend + 2, y1 + 2, 0xFF000000);
-                g.fill(bend - 1, Math.min(y1, y2) - 1, bend + 2, Math.max(y1, y2) + 2, 0xFF000000);
-                g.fill(bend - 1, y2 - 1, x2 + 1, y2 + 2, 0xFF000000);
-            } else {
-                g.hLine(x1, bend, y1, 0xFFFFFFFF);
-                // vLine excludes its endpoints; both horizontal cores include them.
-                g.vLine(bend, Math.min(y1, y2), Math.max(y1, y2), 0xFFFFFFFF);
-                g.hLine(bend, x2, y2, 0xFFFFFFFF);
-            }
+        int pad = outline ? 1 : 0;
+        for (var link : connections) for (var s : link.strokes()) {
+            int x = getX() + panX, y = getY() + panY;
+            g.fill(x + Math.min(s.x1(), s.x2()) - pad, y + Math.min(s.y1(), s.y2()) - pad,
+                    x + Math.max(s.x1(), s.x2()) + pad + 1, y + Math.max(s.y1(), s.y2()) + pad + 1,
+                    outline ? 0xFF000000 : 0xFFFFFFFF);
         }
+    }
+
+    private void routeConnections() {
+        var edges = new ArrayList<PlanGraphRouting.Edge>();
+        for (var cell : cells) if (!collapsed.contains(cell.id)) for (String id : cell.children) {
+            var child = byId.get(id);
+            if (child == null) continue;
+            edges.add(new PlanGraphRouting.Edge(child.id, cell.id));
+        }
+        connections.clear(); connections.addAll(PlanGraphRouting.route(routingNodes(), edges));
+    }
+
+    private List<PlanGraphRouting.Node> routingNodes() {
+        return cells.stream().map(c -> new PlanGraphRouting.Node(c.id, c.x, c.y)).toList();
     }
 
     @Override public void onClick(double mouseX, double mouseY) {
@@ -239,6 +510,7 @@ final class PlanGraphWidget extends AbstractWidget {
             String id = cells.get(focusedCell).id;
             if (!collapsed.remove(id)) collapsed.add(id);
             layout();
+            focus(id);
             return true;
         }
         return false;
@@ -252,8 +524,9 @@ final class PlanGraphWidget extends AbstractWidget {
     private List<Component> tooltip(Cell cell) {
         var lines = new ArrayList<Component>();
         lines.add(icon(cell).getHoverName());
+        if (cell.sharedBatch) lines.add(Component.translatable("screen.craftable.plan.shared_batch"));
         if (cell.deviation) lines.add(Component.translatable("screen.craftable.plan.additional_material"));
-        if (!cell.explanation && cell.made.isEmpty() && cell.recipes.isEmpty())
+        if (!cell.explanation && !cell.sharedBatch && cell.made.isEmpty() && cell.recipes.isEmpty())
             lines.add(Component.translatable("screen.craftable.plan.existing"));
         if (cell.alternatives && cell.needs.size() > 1) lines.add(Component.translatable("screen.craftable.plan.or"));
         for (var stack : cell.needs) lines.add(Component.translatable("screen.craftable.plan.need", stack.getCount(), stack.getHoverName()));
@@ -287,65 +560,12 @@ final class PlanGraphWidget extends AbstractWidget {
                 stack.getCount(), stack.getHoverName()));
     }
 
-    private static void mergeEquivalentBranches(Map<String, PlanView.Node> raw, Map<String, String> aliases) {
-        var children = new HashMap<String, List<String>>();
-        raw.keySet().forEach(p -> children.computeIfAbsent(parent(p), ignored -> new ArrayList<>()).add(p));
-        var shapes = new HashMap<String, Object>();
-        // Same-batch references are a DAG, not independent production. Exclude
-        // their source AND destination subtrees from structural display merging.
-        var referenced = new java.util.HashSet<>(aliases.keySet());
-        referenced.addAll(aliases.values());
-        shape("0", raw, children, referenced, shapes);
-        var first = new HashMap<Object, String>();
-        for (String path : raw.keySet()) {
-            Object shape = shapes.get(path);
-            if (path.equals("0") || shape == null || aliases.containsKey(path)) continue;
-            String previous = first.putIfAbsent(List.of(parent(path), shape), path);
-            if (previous != null) aliasTree(path, previous, children, aliases);
-        }
-    }
-
-    private static Object shape(String path, Map<String, PlanView.Node> raw, Map<String, List<String>> children,
-            java.util.Set<String> referenced, Map<String, Object> shapes) {
-        var node = raw.get(path);
-        if (node == null) return null;
-        var childPaths = children.getOrDefault(path, List.of());
-        // Explanation marks even a single fixed missing item as alternatives.
-        // Identical terminal option sets are additive independent demands, not
-        // AND inputs. At the projection's 16-option cap the set might be cut,
-        // so do not infer equivalence. References retain distinct semantics.
-        // Selected explanation subtrees can merge only with identical shapes.
-        // This is a display
-        // alias, never a change to the demand graph or executable operations.
-        boolean equivalentMissingLeaf = node.explanation() && node.alternatives()
-                && !node.needs().isEmpty() && node.needs().size() < 16 && node.needs().stream().noneMatch(ItemStack::isEmpty)
-                && node.made().isEmpty() && node.recipes().isEmpty() && childPaths.isEmpty();
-        boolean safe = !referenced.contains(path) && node.reference().isEmpty()
-                && (!node.alternatives() || equivalentMissingLeaf);
-        var childShapes = new ArrayList<Object>();
-        for (String child : childPaths) {
-            Object childShape = shape(child, raw, children, referenced, shapes);
-            safe &= childShape != null;
-            if (childShape != null) childShapes.add(List.of(child.substring(path.length()), childShape));
-        }
-        if (!safe) return null;
-        Object result = List.of(new java.util.HashSet<>(CraftPlan.stackKeys(node.needs().stream().map(s -> s.copyWithCount(1)).toList())),
-                CraftPlan.stackKeys(node.made().stream().map(s -> s.copyWithCount(1)).toList()),
-                node.recipes(), node.explanation(), node.alternatives(), childShapes);
-        shapes.put(path, result);
-        return result;
-    }
-
-    private static void aliasTree(String path, String target, Map<String, List<String>> children, Map<String, String> aliases) {
-        // Only display aliases: keep every real demand path and sum its counts
-        // below. Choosing a merged node still constrains all represented paths.
-        aliases.put(path, target);
-        for (String child : children.getOrDefault(path, List.of()))
-            aliasTree(child, target + child.substring(path.length()), children, aliases);
-    }
-
     private int x(Cell c) { return getX() + c.x + panX; }
     private int y(Cell c) { return getY() + c.y + panY; }
+    private void focus(String id) {
+        for (int i = 0; i < cells.size(); i++) if (cells.get(i).id.equals(id)) { focusedCell = i; return; }
+        focusedCell = Math.min(focusedCell, Math.max(0, cells.size() - 1));
+    }
     private static ItemStack icon(Cell c) {
         var values = !c.needs.isEmpty() ? c.needs : c.made;
         if (values.isEmpty()) return ItemStack.EMPTY;
@@ -369,9 +589,12 @@ final class PlanGraphWidget extends AbstractWidget {
     private static final class Cell {
         final String id;
         final List<String> paths = new ArrayList<>(), recipes = new ArrayList<>(), children = new ArrayList<>();
+        final java.util.Set<String> parents = new java.util.HashSet<>();
         final List<ItemStack> needs = new ArrayList<>(), made = new ArrayList<>();
-        boolean explanation, alternatives, deviation;
-        int x, y;
+        boolean explanation, alternatives, deviation, sharedBatch;
+        String owner = "", supply = "";
+        Object alternativesKey;
+        int x, y, depth, column;
         Cell(String id) { this.id = id; }
     }
 }
