@@ -153,7 +153,7 @@ public final class CraftablePayloadHandlers {
                 if (CraftableRequestLimiter.allowDetail(player.getUUID(), player.level().getGameTime()))
                     try (var lease = CraftableRequestLimiter.planning(player.getServer(), player.getUUID(), true)) {
                         if (lease.allowed()) result = CraftingService.preview(player, payload.request(), payload.choicePath(),
-                                payload.witness(), payload.revision());
+                                payload.witness(), payload.revision(), lease::remaining);
                     }
             }
             context.reply(new CraftingDetailPayloads.PreviewResponse(payload.menuId(), payload.revision(), result));
@@ -170,7 +170,7 @@ public final class CraftablePayloadHandlers {
             if (CraftableRequestLimiter.allowCreate(player.getUUID(), player.level().getGameTime()))
                 try (var lease = CraftableRequestLimiter.planning(player.getServer(), player.getUUID(), true)) {
                     if (lease.allowed()) {
-                        var result = CraftingService.confirm(player, payload.token(), payload.witness(), payload.revision());
+                        var result = CraftingService.confirm(player, payload.token(), payload.witness(), payload.revision(), lease::remaining);
                         refreshAfterAttempt(player);
                         var target = result.plan() == null ? payload.recipe() : result.plan().target();
                         context.reply(CreateRecipeResultPayload.from(target, payload.revision(), result));
@@ -228,7 +228,7 @@ public final class CraftablePayloadHandlers {
                     return;
                 }
                 var result = CraftingService.attempt(player, payload.recipeId(), payload.requestId(),
-                        payload.precedingPress(), payload.allowDrops(), payload.partialPolicy());
+                        payload.precedingPress(), payload.allowDrops(), payload.partialPolicy(), lease::remaining);
                 refreshAfterAttempt(player);
                 context.reply(CreateRecipeResultPayload.from(payload.recipeId(), payload.requestId(), result));
             }

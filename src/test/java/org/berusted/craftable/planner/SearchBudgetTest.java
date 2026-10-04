@@ -5,6 +5,26 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SearchBudgetTest {
+    @Test void omittedBranchDoesNotExhaustTheRetainedContinuation() {
+        var clock = new AtomicLong();
+        var budget = SearchBudget.resumable(clock::get, 100, 10);
+        budget.beginSlice(20);
+        budget.truncate();
+        assertTrue(budget.truncated());
+        assertFalse(budget.exhausted());
+        assertTrue(budget.enter());
+        clock.set(20);
+        assertFalse(budget.canContinue());
+        assertFalse(budget.exhausted());
+        assertEquals(80, budget.remainingNanos());
+        budget.endSlice();
+        clock.set(1_000_000);
+        budget.beginSlice(20);
+        assertTrue(budget.enter());
+        assertFalse(budget.exhausted());
+        budget.endSlice();
+    }
+
     @Test void slicePauseIsNotExhaustionAndIdleDoesNotRefillOrSpendCpu() {
         var clock = new AtomicLong();
         var budget = SearchBudget.resumable(clock::get, 100, 10);

@@ -41,8 +41,9 @@ final class M4BrowsingScenario {
             long completed = ids.stream().filter(org.berusted.craftable.client.recipebook.ClientRecipeStatusStore::computed).count();
             if (completed != ids.size() && age - browseStarted < 400) return false;
             require(completed == ids.size(), "Local hidden filtering did not finish within 400 ticks: " + completed + "/" + ids.size());
-            long unknown = ids.stream().filter(id -> org.berusted.craftable.client.recipebook.ClientRecipeStatusStore.reason(id)
-                    == CraftingResultCode.SEARCH_BUDGET_EXCEEDED).count();
+            var unknownIds = ids.stream().filter(id -> org.berusted.craftable.client.recipebook.ClientRecipeStatusStore.reason(id)
+                    == CraftingResultCode.SEARCH_BUDGET_EXCEEDED).toList();
+            long unknown = unknownIds.size();
             var cpu = filterCpu.stream().sorted().toList();
             Craftable.LOGGER.warn("M48_LIVE_FILTER targets={} ticks={} quantityTasks={} unknown={} catalogBuilds={} cpuP95Ms={} cpuMaxMs={}",
                     ids.size(), age - browseStarted, org.berusted.craftable.client.recipebook.ClientBrowsePlanner.searches() - browseSearches,
@@ -50,7 +51,7 @@ final class M4BrowsingScenario {
                     cpu.get((int) Math.ceil(cpu.size() * .95) - 1), cpu.getLast());
             filterCpu.clear();
             filterTimings.add((System.nanoTime() - browseStartNanos) / 1e6);
-            require(unknown == 0, "Stopped unknown work is not filter convergence");
+            require(unknown == 0, "Stopped unknown work is not filter convergence: " + unknownIds);
             if (filterTimings.size() < 5) {
                 // A fresh dynamic session must capture/transfer/bind again,
                 // but the connection's static catalog must survive.

@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.LongSupplier;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import org.berusted.craftable.Craftable;
@@ -52,10 +53,17 @@ public final class CraftingService {
 
     public static Outcome attempt(ServerPlayer player, net.minecraft.resources.ResourceLocation recipe,
             long sequence, long precedingPress, boolean allowDrops, CraftRequest.PartialPolicy policy) {
+        return attempt(player, recipe, sequence, precedingPress, allowDrops, policy, null);
+    }
+
+    public static Outcome attempt(ServerPlayer player, net.minecraft.resources.ResourceLocation recipe,
+            long sequence, long precedingPress, boolean allowDrops, CraftRequest.PartialPolicy policy,
+            LongSupplier remainingNanos) {
         if (!validContext(player)) return Outcome.failed(CraftingResultCode.INVALID_CONTEXT);
         if (!CraftingSessions.acceptSequence(player, sequence)) return Outcome.failed(CraftingResultCode.REQUEST_THROTTLED);
         boolean partial = CraftingSessions.partialGesture(player, recipe, precedingPress);
-        Outcome outcome = create(player, new CraftRequest(recipe, 1, partial, allowDrops, policy, java.util.Map.of()));
+        Outcome outcome = create(player, new CraftRequest(recipe, 1, partial, allowDrops, policy, java.util.Map.of()),
+                false, null, null, null, remainingNanos);
         CraftingSessions.recordAttempt(player, recipe, sequence, outcome.code(), partial);
         return outcome;
     }
@@ -70,6 +78,18 @@ public final class CraftingService {
 
     public static Draft preview(ServerPlayer player, CraftRequest request, String choicePath,
             CraftPlan.Witness witness, long sequence) {
+        return preview(player, request, choicePath, witness, sequence, null);
+    }
+
+    public static Draft preview(ServerPlayer player, CraftRequest request, String choicePath,
+            CraftPlan.Witness witness, long sequence, LongSupplier remainingNanos) {
+        return preview(player, request, choicePath, witness, sequence, null, remainingNanos);
+    }
+
+    // Functional GameTests inject the same budget used for their plan fixture;
+    // network/public entry points always keep the production admission cap.
+    static Draft preview(ServerPlayer player, CraftRequest request, String choicePath,
+            CraftPlan.Witness witness, long sequence, SearchBudget testBudget, LongSupplier remainingNanos) {
         if (!validContext(player)) return new Draft(new UUID(0, 0),
                 org.berusted.craftable.planner.PlanView.failed(CraftingResultCode.INVALID_CONTEXT),
                 new org.berusted.craftable.planner.PlanView.Choices(List.of(), false));
@@ -77,18 +97,26 @@ public final class CraftingService {
         if (witness != null && (!CraftingSessions.acceptSequence(player, sequence)
                 || !CraftingSessions.acceptsWitness(player, witness))) return failedDraft(CraftingResultCode.ENVIRONMENT_CHANGED);
         try {
+            if (admissionExhausted(remainingNanos)) return failedDraft(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
             var snapshot = EnvironmentSnapshotService.fresh(player);
-            var prepared = witness == null ? prepare(player, request, snapshot, new SearchBudget(8_000_000L))
-                    : prepareWitness(player, request, snapshot, witness, new SearchBudget(8_000_000L));
+            var allowance = testBudget == null ? planningBudget(remainingNanos, System::nanoTime) : testBudget;
+            if (allowance == null) return failedDraft(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
+            var prepared = witness == null ? prepare(player, request, snapshot, allowance)
+                    : prepareWitness(player, request, snapshot, witness, allowance);
+            if (prepared.result().plan().isPresent() && exhausted(allowance, remainingNanos))
+                return failedDraft(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
             var view = org.berusted.craftable.planner.PlanView.from(prepared.recipes(), prepared.request(),
                     prepared.result(), prepared.delivery().drops(), sources(snapshot).stream().map(ResourceLedger.Source::stack)
                             .filter(s -> !CraftingRecipes.protectedStack(s)).toList());
+            var choices = view.choices(prepared.recipes(), prepared.request(), choicePath);
+            if (prepared.result().plan().isPresent() && exhausted(allowance, remainingNanos))
+                return failedDraft(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
             // An incomplete display must never authorize an undisclosed plan.
             UUID token = view.complete() && (!view.primary().isEmpty())
                     && (prepared.result().plan().filter(CraftPlan::partial).isEmpty()
                         || request.partial() && prepared.request().policy() != CraftRequest.PartialPolicy.NEVER)
                     ? CraftingSessions.offer(player, prepared, witness != null) : new UUID(0, 0);
-            return new Draft(token, view, view.choices(prepared.recipes(), prepared.request(), choicePath));
+            return new Draft(token, view, choices);
         } catch (IllegalArgumentException rejected) {
             return failedDraft(CraftingResultCode.ENVIRONMENT_CHANGED);
         } catch (RuntimeException exception) {
@@ -103,6 +131,16 @@ public final class CraftingService {
     }
 
     public static Outcome confirm(ServerPlayer player, UUID token, CraftPlan.Witness witness, long sequence) {
+        return confirm(player, token, witness, sequence, null);
+    }
+
+    public static Outcome confirm(ServerPlayer player, UUID token, CraftPlan.Witness witness, long sequence,
+            LongSupplier remainingNanos) {
+        return confirm(player, token, witness, sequence, null, remainingNanos);
+    }
+
+    static Outcome confirm(ServerPlayer player, UUID token, CraftPlan.Witness witness, long sequence,
+            SearchBudget testBudget, LongSupplier remainingNanos) {
         if (!validContext(player)) {
             CraftingSessions.discardOffer(player);
             return Outcome.failed(CraftingResultCode.CONFIRMATION_EXPIRED);
@@ -111,10 +149,13 @@ public final class CraftingService {
             return Outcome.failed(CraftingResultCode.REQUEST_THROTTLED);
         var confirmation = CraftingSessions.take(player, token);
         if (confirmation == null) return Outcome.failed(CraftingResultCode.CONFIRMATION_EXPIRED);
+        if (!confirmation.rules().equals(CraftableServerConfig.craftingRules())
+                || !CraftingRecipes.isCurrentGeneration(player.getServer(), confirmation.recipeGeneration()))
+            return Outcome.failed(CraftingResultCode.ENVIRONMENT_CHANGED);
         if (confirmation.witness() != (witness != null)
                 || witness != null && !CraftingSessions.acceptsWitness(player, witness))
             return Outcome.failed(CraftingResultCode.ENVIRONMENT_CHANGED);
-        return create(player, confirmation.request(), true, null, confirmation, witness);
+        return create(player, confirmation.request(), true, testBudget, confirmation, witness, remainingNanos);
     }
 
     // Deterministic GameTests supply a generous deadline; production callers
@@ -130,16 +171,31 @@ public final class CraftingService {
 
     private static Outcome create(ServerPlayer player, CraftRequest request, boolean confirmed, SearchBudget budget,
             CraftingSessions.Confirmation confirmation, CraftPlan.Witness witness) {
+        return create(player, request, confirmed, budget, confirmation, witness, null);
+    }
+
+    private static Outcome create(ServerPlayer player, CraftRequest request, boolean confirmed, SearchBudget budget,
+            CraftingSessions.Confirmation confirmation, CraftPlan.Witness witness, LongSupplier remainingNanos) {
         if (!validContext(player)) return Outcome.failed(CraftingResultCode.INVALID_CONTEXT);
         if (!ACTIVE.add(player.getUUID())) return Outcome.failed(CraftingResultCode.REQUEST_THROTTLED);
         try {
+            if (admissionExhausted(remainingNanos)) return Outcome.failed(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
             var snapshot = EnvironmentSnapshotService.fresh(player);
-            // Scanning has its own bounded M1 radius/volume. Start the search
-            // deadline after scanning, while total server admission accounts
-            // for the complete request separately.
-            var allowance = budget == null ? new SearchBudget(8_000_000L) : budget;
+            // Network requests borrow only what is left after fresh discovery.
+            // Search, real validation and delivery share this one deadline.
+            var allowance = budget == null ? planningBudget(remainingNanos, System::nanoTime) : budget;
+            if (allowance == null) return Outcome.failed(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
             Prepared prepared = witness == null ? prepare(player, request, snapshot, allowance)
                     : prepareWitness(player, request, snapshot, witness, allowance);
+            // Read-only preparation may time out after complete exclusion.
+            // Plain C still has a proven material failure; do not turn it into
+            // uncertainty or let unfinished diagnostic counts authorize work.
+            if (confirmation == null && !request.partial() && prepared.fullMissing()
+                    && prepared.result().code() == CraftingResultCode.SEARCH_BUDGET_EXCEEDED)
+                return Outcome.failed(CraftingResultCode.MISSING_INGREDIENTS);
+            if (prepared.result().code() == CraftingResultCode.SEARCH_BUDGET_EXCEEDED
+                    || prepared.result().plan().isPresent() && exhausted(allowance, remainingNanos))
+                return Outcome.failed(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
             if (confirmation != null && !confirmation.matches(prepared)) {
                 return Outcome.failed(CraftingResultCode.ENVIRONMENT_CHANGED);
             }
@@ -158,6 +214,9 @@ public final class CraftingService {
                     || prepared.recipes.generation() != new CraftingRecipes(player, workbench(player, snapshot)).generation()) {
                 return Outcome.failed(CraftingResultCode.ENVIRONMENT_CHANGED);
             }
+            // Reject before the atomic transaction begins; never stop halfway
+            // through mutations. Admission still charges its complete duration.
+            if (exhausted(allowance, remainingNanos)) return Outcome.failed(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
             var code = CraftingTransaction.execute(player, plan, snapshot, prepared.delivery);
             return new Outcome(code, plan, plan.missing(),
                     code == CraftingResultCode.CREATED || code == CraftingResultCode.PARTIAL_CREATED
@@ -171,6 +230,20 @@ public final class CraftingService {
             ACTIVE.remove(player.getUUID());
             EnvironmentSnapshotService.invalidate(player.getUUID());
         }
+    }
+
+    /** Zero remaining admission must not manufacture a fresh solver deadline. */
+    static SearchBudget planningBudget(LongSupplier remainingNanos, LongSupplier clock) {
+        long nanos = remainingNanos == null ? 8_000_000L : Math.min(8_000_000L, remainingNanos.getAsLong());
+        return nanos <= 0 ? null : new SearchBudget(clock, nanos, SearchBudget.MAX_STATES);
+    }
+
+    private static boolean admissionExhausted(LongSupplier remainingNanos) {
+        return remainingNanos != null && remainingNanos.getAsLong() <= 0;
+    }
+
+    private static boolean exhausted(SearchBudget budget, LongSupplier remainingNanos) {
+        return !budget.alive() || admissionExhausted(remainingNanos);
     }
 
     static Prepared prepare(ServerPlayer player, CraftRequest requested, EnvironmentSnapshot snapshot, SearchBudget budget) {
@@ -265,12 +338,12 @@ public final class CraftingService {
             var code = !budget.alive() ? CraftingResultCode.SEARCH_BUDGET_EXCEEDED
                     : !valid ? CraftingResultCode.UNSUPPORTED_RECIPE : null;
             if (code != null) return new Prepared(SearchResult.blocked(code), effective, recipes, rules,
-                    MainInventoryInsertion.Delivery.failed(code));
+                    MainInventoryInsertion.Delivery.failed(code), search.fullEvidence() != null);
         }
         var delivery = result.plan().map(plan ->
                 MainInventoryInsertion.simulate(player.getInventory(), plan, snapshot, effective.allowDrops()))
                 .orElseGet(() -> MainInventoryInsertion.Delivery.failed(result.code()));
-        return new Prepared(result, effective, recipes, rules, delivery);
+        return new Prepared(result, effective, recipes, rules, delivery, search.fullEvidence() != null);
     }
 
     private static List<ResourceLedger.Source> sources(EnvironmentSnapshot snapshot) {
@@ -488,7 +561,12 @@ public final class CraftingService {
     }
 
     record Prepared(SearchResult result, CraftRequest request, CraftingRecipes recipes,
-            CraftableServerConfig.CraftingRules rules, MainInventoryInsertion.Delivery delivery) {}
+            CraftableServerConfig.CraftingRules rules, MainInventoryInsertion.Delivery delivery, boolean fullMissing) {
+        Prepared(SearchResult result, CraftRequest request, CraftingRecipes recipes,
+                CraftableServerConfig.CraftingRules rules, MainInventoryInsertion.Delivery delivery) {
+            this(result, request, recipes, rules, delivery, false);
+        }
+    }
 
     public record Draft(UUID token, org.berusted.craftable.planner.PlanView view,
             org.berusted.craftable.planner.PlanView.Choices choices) {}

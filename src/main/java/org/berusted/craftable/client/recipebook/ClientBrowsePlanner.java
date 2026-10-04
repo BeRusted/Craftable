@@ -199,7 +199,7 @@ public final class ClientBrowsePlanner {
         if (result.isPresent()) {
             if (hiddenTurn) background = null; else front = null;
             if (selected.owner != null) finishDetail(selected, result.get());
-            else ClientRecipeStatusStore.completeLocal(selected.id, result.get(), selected.search.fullEvidence(), selected.diagnostic);
+            else ClientRecipeStatusStore.completeLocal(selected.request, result.get(), selected.search.fullEvidence(), selected.diagnostic);
         }
         return result.isPresent();
     }
@@ -210,7 +210,7 @@ public final class ClientBrowsePlanner {
         // only an earlier batch of 64 IDs. Faster dispatch must not bypass the
         // closure and turn hundreds of excluded roots into quantity searches.
         var request = new CraftRequest(id, 1, false, drops, policy, Map.of());
-        var evidence = closure.excludes(input, request);
+        var evidence = closure.excludes(input, mathematical(request, false));
         if (evidence == null) return true;
         ClientRecipeStatusStore.completeLocal(id,
                 SearchResult.blocked(org.berusted.craftable.api.CraftingResultCode.MISSING_INGREDIENTS), evidence, false);
@@ -229,13 +229,21 @@ public final class ClientBrowsePlanner {
         var inventory = snapshot.inventory();
         var playerRefs = snapshot.playerReferences();
         var allRefs = snapshot.references();
-        var search = new CraftSearch(input, request, snapshot.sources(), SearchBudget.resumable(8_000_000L),
+        var search = new CraftSearch(input, mathematical(request, diagnostic), snapshot.sources(), SearchBudget.resumable(8_000_000L),
                 plan -> MainInventoryInsertion.simulate(inventory, snapshot.inventoryMaximum(), plan,
                         playerRefs, allRefs, request.allowDrops()).failure()).withReachability(closure);
         var evidence = ClientRecipeStatusStore.evidence(request);
         if (diagnostic) search.withFullEvidence(evidence)
                 .withDiagnosticBudget(SearchBudget.resumable(8_000_000L));
         return new Task(request.recipe(), diagnostic, search, owner, request);
+    }
+
+    /** Read-only preparation must remain available under NEVER. Keep the
+     * mathematical policy identical in both phases so full evidence matches;
+     * the original intent still controls display, witness and server actions. */
+    private static CraftRequest mathematical(CraftRequest request, boolean diagnostic) {
+        return new CraftRequest(request.recipe(), request.batches(), diagnostic, request.allowDrops(),
+                CraftRequest.PartialPolicy.EXPLICIT_SAFE, request.selections());
     }
 
     public static long scopeVersion() { return scopeVersion; }
@@ -305,7 +313,7 @@ public final class ClientBrowsePlanner {
             // allowance when a slider or mouse returns to the same request.
             ClientRecipeStatusStore.completeLocal(front.request,
                     SearchResult.blocked(org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED),
-                    front.search.fullEvidence(), true);
+                    front.search.fullEvidence(), front.diagnostic);
             front.search.cancel(); front = null;
         }
     }
@@ -341,6 +349,12 @@ public final class ClientBrowsePlanner {
                 ClientRecipeStatusStore.completeLocal(request, unknown, null, false); publishMaximum(work);
             }
             else publishPreview(work, unknown);
+            return null;
+        }
+        if (!work.maximum && ClientRecipeStatusStore.diagnosticExhausted(request)) {
+            // An unchanged lease, a re-opened detail, or the overlay's intent
+            // promotion cannot replenish a completed diagnostic allowance.
+            publishPreview(work, SearchResult.blocked(ClientRecipeStatusStore.diagnosticReason(request)));
             return null;
         }
         // A browsing full-failure proof is valid for the identical intent only;
@@ -449,8 +463,9 @@ public final class ClientBrowsePlanner {
 
     private static void abandon(Task task) {
         task.search.cancel();
-        ClientRecipeStatusStore.completeLocal(task.id,
-                SearchResult.blocked(org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED), null, true);
+        ClientRecipeStatusStore.completeLocal(task.request,
+                SearchResult.blocked(org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED),
+                task.search.fullEvidence(), task.diagnostic);
     }
 
     private static void resetCalculations() {

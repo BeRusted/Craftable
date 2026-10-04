@@ -167,6 +167,7 @@ public final class M4ClientSmoke {
 
     private static void detailsAndCrafting(Minecraft mc) throws Exception {
             if (stage == 4 && ready()) {
+                M4DiagnosticLifecycleScenario.verify();
                 M4GraphPresentationScenario.verify();
                 var draft = draft();
                 require(draft.view().code() == CraftingResultCode.CREATED, "Full preview not craftable: " + draft.view().code());

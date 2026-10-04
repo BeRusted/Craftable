@@ -35,10 +35,14 @@ public final class M4InteractionGameTests {
                     new SearchBudget(1_000_000_000L));
             helper.assertTrue(prepared.result().plan().isPresent(), "valid witness rejected");
             long before = CraftingService.activeFullSearches;
-            var draft = CraftingService.preview(player, request, "", witness, 100);
+            // Functional replay/transaction assertions must not depend on JIT
+            // time inside the real 8 ms admission cap (covered separately).
+            var draft = CraftingService.preview(player, request, "", witness, 100,
+                    new SearchBudget(() -> 0, 1, SearchBudget.MAX_STATES), null);
             helper.assertFalse(draft.token().equals(new UUID(0, 0)), "no witness token: " + draft.view().code());
             helper.assertValueEqual(workbenchUses(player), uses, "preview counted workbench use");
-            var result = CraftingService.confirm(player, draft.token(), witness, 101);
+            var result = CraftingService.confirm(player, draft.token(), witness, 101,
+                    new SearchBudget(() -> 0, 1, SearchBudget.MAX_STATES), null);
             helper.assertValueEqual(result.code(), CraftingResultCode.CREATED, "witness commit");
             helper.assertValueEqual(CraftingService.activeFullSearches, before, "witness re-searched");
             helper.assertValueEqual(player.getInventory().countItem(Items.DIAMOND_PICKAXE), 1, "witness output");

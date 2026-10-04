@@ -173,8 +173,11 @@ public final class CraftSearch {
             }
             CraftPlan plan = search();
             if (plan != null) return finish(success(plan));
-            if (budget.truncated()) return finish(limited());
+            if (budget.exhausted()) return finish(limited());
             if (!frontier.isEmpty()) return Optional.empty();
+            // An omitted alternative prevents a negative proof, not a later
+            // slice from finding a concrete full witness in the kept frontier.
+            if (budget.truncated()) return finish(limited());
             if (phase == Phase.EXISTING) {
                 failure = CraftingResultCode.MISSING_INGREDIENTS;
                 bestMissing = List.of(); bestProgress = bestBindings = -1;
@@ -212,7 +215,7 @@ public final class CraftSearch {
 
     private SearchResult success(CraftPlan plan) {
         return new SearchResult(plan.partial() ? CraftingResultCode.PARTIAL_CREATED : CraftingResultCode.CREATED,
-                Optional.of(plan), plan.missing(), !budget.truncated(), visitedStates());
+                Optional.of(plan), plan.missing(), !plan.partial() || !budget.truncated(), visitedStates());
     }
 
     private SearchResult limited() {
@@ -266,10 +269,10 @@ public final class CraftSearch {
                 // ingredient assignments. Mixed wood batch permutations must
                 // not replay the same exhausted inventory exponentially.
                 // Partial preparation keeps its stricter history-sensitive key.
-                if (!partialMode && state.grids.isEmpty() && state.active.isEmpty()
-                        && (!reserveMemo(state.ledger.identityBytes(), state)
-                            || !completedPrefixes.add(List.of(state.completed, state.steps.size(), state.ledger.batchBoundaryIdentity()))))
-                    continue;
+                if (!partialMode && state.grids.isEmpty() && state.active.isEmpty()) {
+                    Object identity = List.of(state.completed, state.steps.size(), state.ledger.batchBoundaryIdentity());
+                    if (!rememberIdentity(completedPrefixes, identity, state.ledger.identityBytes(), state)) continue;
+                }
                 expandRecipe(state, r.recipe, "0", 0, null);
                 push(state);
             } else if (task instanceof Finish finish) {
@@ -340,10 +343,9 @@ public final class CraftSearch {
                 // to revisit. Avoid boxing thousands of source counters for
                 // each slot in a full storage-room inventory.
                 if (!existingOnly || existing.size() > 1) {
-                    if (!reserveMemo(state.ledger.identityBytes() + state.tasks.size() * 128L
-                            + state.grids.size() * 256L + state.steps.size() * 128L, state)) continue;
                     Object identity = state.identity(need);
-                    if (!visited.add(identity)) continue;
+                    if (!rememberIdentity(visited, identity, state.ledger.identityBytes() + state.tasks.size() * 128L
+                            + state.grids.size() * 256L + state.steps.size() * 128L, state)) continue;
                 }
                 List<State> branches = new ArrayList<>();
                 for (var taken : existing) {
@@ -410,9 +412,18 @@ public final class CraftSearch {
                     if (!partialMode) remember(missing);
                     if (partialMode) branches.add(missing);
                 }
-                // Hard frontier limit bounds branch memory as well as CPU.
-                for (int i = branches.size() - 1; i >= 0; i--) {
-                    if (frontier.size() >= SearchBudget.MAX_FRONTIER) { budget.truncate(); break; }
+                // Keep the preferred prefix (existing stock, then cheapest
+                // producer), not the tail just because pushing is reversed.
+                int kept = 0;
+                long room = MAX_RETAINED_BYTES - frontierBytes - memoBytes;
+                while (kept < branches.size() && kept < SearchBudget.MAX_FRONTIER - frontier.size()) {
+                    long bytes = branches.get(kept).retainedBytes();
+                    if (bytes > room) break;
+                    room -= bytes;
+                    kept++;
+                }
+                if (kept < branches.size()) budget.truncate();
+                for (int i = kept - 1; i >= 0; i--) {
                     push(branches.get(i));
                 }
             }
@@ -420,10 +431,12 @@ public final class CraftSearch {
         return null;
     }
 
-    private boolean reserveMemo(long bytes, State current) {
+    private boolean rememberIdentity(Set<Object> identities, Object identity, long bytes, State current) {
+        if (identities.contains(identity)) return false;
         if (frontierBytes + memoBytes + current.retainedBytes() + bytes > MAX_RETAINED_BYTES) {
             budget.truncate(); return false;
         }
+        identities.add(identity);
         memoBytes += bytes;
         return true;
     }
@@ -457,7 +470,17 @@ public final class CraftSearch {
         if (parent != null) state.tasks.addFirst(new Supply(parent, id));
         state.tasks.addFirst(new Finish(recipe, id, path, parent == null));
         var requirements = new ArrayList<>(recipe.requirements());
-        requirements.sort(Comparator.comparingInt(r -> r.ingredient().getItems().length));
+        // Detect a fixed raw-material deficit before backtracking through
+        // unrelated intermediate producers. This changes only visit order;
+        // it is not a quantity/presence proof (remainders may supply a need).
+        var producerless = new HashSet<Integer>();
+        if (phase == Phase.FULL) for (var r : requirements) {
+            if (recipes.producing(r.ingredient()).isEmpty() && !recipes.hasUnsupportedProducer(r.ingredient())
+                    && !recipes.mayReturn(r.ingredient()))
+                producerless.add(r.slot());
+        }
+        requirements.sort(Comparator.<CraftingRecipes.Requirement>comparingInt(r -> r.ingredient().getItems().length)
+                .thenComparingInt(r -> producerless.contains(r.slot()) ? 0 : 1));
         for (int i = requirements.size() - 1; i >= 0; i--) {
             var requirement = requirements.get(i);
             state.tasks.addFirst(new Need(requirement.ingredient(), id, requirement.slot(),
@@ -495,16 +518,7 @@ public final class CraftSearch {
                 // This relaxation ignores permissions so a genuinely needed
                 // locked intermediate can still be diagnosed by search. Every
                 // expanded recipe is checked there; this set never authorizes it.
-                if (result.contains(entry.output().getItem())) continue;
-                boolean possible = true;
-                for (var requirement : entry.requirements()) {
-                    boolean any = false;
-                    for (ItemStack option : requirement.ingredient().getItems()) {
-                        if (result.contains(option.getItem())) { any = true; break; }
-                    }
-                    if (!any) { possible = false; break; }
-                }
-                if (possible) shared.changed |= result.add(entry.output().getItem());
+                shared.changed |= recipes.addReachableOutputs(entry, result);
             }
             if (!shared.changed) {
                 shared.value = Set.copyOf(result);

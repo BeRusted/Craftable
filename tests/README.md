@@ -24,7 +24,7 @@
 | unit | `cleanTest test` | 模式/状态、手势、输入边界、预算、网络帧、快照接收/传输策略、知识文件、中英文键/格式参数及单行文案；纯 UI 几何的正交路由、遮挡/假接、交叉断口和有界确定性 | 真实菜单渲染、世界事务、局域网 |
 | server | `runGameTestServer` | 环境/单步/递归/余料/回滚、见证攻击和差分、身份/续算、随机图、缓存 | 客户端帧、多设备网络延迟 |
 | inventory | `runClient -Pm3Smoke` | 原版配方书/筛选/C、实体工作台、切分类、模式和网格/光标返还、三种菜单材料换位/显示稳定、原版药水效果 | 玩家全部装备操作及真实两机体验 |
-| planning | `runClient -Pm4Smoke` | 静态目录、筛选复用/调度、Shift+C 单一操作/小刷新、自动资源更新/平移保持、混合材料分支、候选/数量/MAX/收支、见证确认、部分、GUI/语言；船展示帧 C 与根成品切换重算 | 所有模组目录、低配/多人高 RTT 的普遍性能保证 |
+| planning | `runClient -Pm4Smoke` | 静态目录、筛选复用/调度、完整结论与诊断隔离、背景任务提升/未知终止/NEVER 只读、Shift+C 单一操作/小刷新、自动资源更新/平移保持、混合材料分支、候选/数量/MAX/收支、见证确认、部分、GUI/语言；船展示帧 C 与根成品切换重算 | 所有模组目录、低配/多人高 RTT 的普遍性能保证 |
 | knowledge | 连续两次 `runServer -Pm47Smoke` | 同一隔离存档跨进程缓存加载、真实 reload、专服无客户端类污染 | 首次无缓存冷启动（已有缓存时）、不同硬件/I/O 故障全集 |
 | baseline | `cleanTest test runGameTestServer build` | 无图形常规回归及 JAR | 人工验收完成 |
 
@@ -42,6 +42,8 @@ planning 内的 `m4-sibling-{diamond_pickaxe,repeater}-{missing,real}.png`、`m4
 | `execution/M4PlanningGameTests.java`、`M4TransactionGameTests.java`、`M4RandomGraphGameTests.java` | 递归、可逆转换剪枝/改产量反例、全需求缺口数量/有材料起点诊断、账本结果/容量/事务/回滚统计及随机图 |
 | `execution/M4DetailsGameTests.java`、`M4InteractionGameTests.java` | 详情/部分意图、令牌、完整见证/空转拒绝、服务器失败证据复用、C/详情缺口一致和失败不消费、成功操作与多批次统计；默认原木解释不绕木头、显式木头选择/桦木产物；钻石/红石跨需求共享批次、已有材料与向上取整、无虚构操作/成本、真实事务单块消耗及六件剩余物品；默认铁锭/块解释止于逆转换、显式选择及实际压缩/拆解保留 |
 | `execution/M4MenuResourceGameTests.java` | 原版 2×2/临时背包/实体工作台输入及光标实际取料；结果/非当前网格排除、稳定引用/换位失效、见证零重搜、容量/保护栈及回滚 |
+| `execution/M410SearchRegressionGameTests.java`、`M4AdmissionGameTests.java` | 钓鱼竿数量缺口/同核小片、结构省略后保留完整见证/未知不授权部分、静态返还物闭包与合法生产反例；共享 admission 扣除扫描成本，C/详情/确认/见证耗尽零搜索/消耗，完整否定不被诊断超限抹除 |
+| `client/recipebook/ClientDiagnosticLifecycleTest.java`（JUnit）、`M4DiagnosticLifecycleScenario.java`（客户端源集） | 结论与诊断分离、同身份未知终止、成功不降级；真实详情提升同一 continuation、失败证据升级和 NEVER 只读边界，沿原 planning 入口运行 |
 | `execution/M48ContinuationGameTests.java`、`M4PreviewGameTests.java` | 同核心续算、共享闭包/证据；旧批量 facade 的基线不是现行网络入口 |
 | `recipe/M4KnowledgeGameTests.java` | 静态关系与缓存边界 |
 | `src/m3ClientTest/java/.../client/M3ClientSmoke.java` | inventory 唯一入口；历史源集名保留，非 M3 专属测试框架 |
@@ -58,9 +60,9 @@ GameTest 当前依赖 NeoForge 发现及包内测试接口，继续留在 main �
 
 ## 4. 人工边界与阶段收口
 
-- 当前唯一有效人工清单：[M4 A–L](../docs/18-m4-acceptance.md)。本轮优先 C.23 单入线/烟熏炉材料合并和 C.22 配方链有限统一整理、C.20 同父合并/跨层连线/往返解释及 C.19 共享批次数量；C.21 单次软对齐的历史限制由 C.22–C.23 补充/替代。兼顾 C.18 玩家文案、C.17 LF/通配输入/解释链、C.16 缺料叶、C.15 船材质、J.12 光标/输入格换位及原有 UI 回归；协议 9 两端同一 JAR。
+- 当前唯一有效人工清单：[M4 A–L](../docs/18-m4-acceptance.md)。本轮优先 C.24 计算结论与诊断闭环，再完成 C.23 单入线/烟熏炉材料合并和 C.22 配方链有限统一整理、C.20 同父合并/跨层连线/往返解释及 C.19 共享批次数量；C.21 单次软对齐的历史限制由 C.22–C.23 补充/替代。兼顾 C.18 玩家文案、C.17 LF/通配输入/解释链、C.16 缺料叶、C.15 船材质、J.12 光标/输入格换位及原有 UI 回归；协议 9 两端同一 JAR。
 - [数据包夹具](datapacks/README.md) 用于真实配方/标签重载；不自动安装到玩家存档。
 - 自动计数证明“零服务端逐目标浏览”“见证验证零完整重搜”，玩家不必靠速度猜测或构造恶意包。
 - 低配、大目录端到端、1/16/64 容器与 1/2/8 真实客户端高 RTT 矩阵属 M8 扩展观测；不能为了收口把它们标为已通过。
-- 清理批次删除七项退役 JUnit 后为 62 项；连续 C 修复增加三项，玩家文案结构检查再增加三项，有限路由新增十项，本轮单入点/出点再新增两项，最终基线实际执行 80 项（几何 12 项），失败/错误/跳过均为 0；证据 `run/verification/20261004-142908-961-baseline/`，XML 已另存 `junit-results/`。可逆转换/统计和缺口诊断修复后有 98 项 GameTest；光标/网格资源修复新增五项，木材解释链新增一项，共享批次修正新增三项，解释逆转换边界再新增一项，当前 108 项，最终基线全通过。最终 planning 为 `run/verification/20261004-143052-699-planning/`，完整通过并归档 13 份原控件样本。数量不是覆盖率，变更后应核对实际报告而非只对总数。
+- 前轮 80 项 JUnit/108 项 GameTest 的证据为 `run/verification/20261004-142908-961-baseline/`。本轮计算闭环新增 10 项 JUnit、9 项 GameTest，最终基线 `run/verification/20261004-194449-520-baseline/` 实际执行 90 项 JUnit，失败/错误/跳过均为 0；117 项 GameTest 全通过，XML 已另存 `junit-results/`。最终 planning 为 `run/verification/20261004-193830-831-planning/`，包括诊断生命周期、五轮 887 目标零未知、范围复用和原 UI 回归；13 份图样本已归档，本轮未重新逐图人工验收。inventory `run/verification/20261004-194921-746-inventory/` 完整通过，连续 C 与三种菜单材料换位/显示稳定保留。计算片仍为协作软预算，400 tick 观察最大 20.6277 ms，不宣称 2 ms 硬实时保证。未重跑 knowledge 跨进程专门组；数量不是覆盖率，变更后应核对实际报告而非只对总数。
 - [当前进展与清理证据](../docs/17-m4-progress.md) 记录本轮结果；历史日志保留，不据历史通过替代新构建验收。

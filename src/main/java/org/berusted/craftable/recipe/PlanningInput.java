@@ -104,6 +104,36 @@ public final class PlanningInput {
     public boolean fullySupported() { return index.valueRecipes.size() == index.ordered.size(); }
     public boolean workbench() { return workbench; }
 
+    /** Conservative scheduling hint only. A bucket returned by another input
+     * must not be moved before the operation that can return it. Unknown
+     * behavior disables the hint rather than becoming an absence proof. */
+    public boolean mayReturn(Ingredient ingredient) {
+        if (!fullySupported()) return true;
+        for (var option : ingredient.getItems()) if (index.returnedItems.contains(option.getItem())) return true;
+        return false;
+    }
+
+    /** Presence-only relaxation over the frozen ordinary model. Include
+     * returned containers as well as the main output; neither implies that
+     * enough material exists or that this recipe may execute. */
+    public boolean addReachableOutputs(CraftingRecipes.Entry entry, Set<net.minecraft.world.item.Item> reachable) {
+        if (reachable.contains(entry.output().getItem()) && !index.returningRecipes.contains(entry.id())) return false;
+        for (var requirement : entry.requirements()) {
+            boolean any = false;
+            for (var option : requirement.ingredient().getItems()) {
+                if (reachable.contains(option.getItem())) { any = true; break; }
+            }
+            if (!any) return false;
+        }
+        boolean changed = reachable.add(entry.output().getItem());
+        for (var requirement : entry.requirements()) for (var option : requirement.ingredient().getItems()) {
+            if (!reachable.contains(option.getItem())) continue;
+            var remainder = index.remainders.get(option.getItem());
+            if (remainder != null && !remainder.isEmpty()) changed |= reachable.add(remainder.getItem());
+        }
+        return changed;
+    }
+
     /** A nested exact inverse cannot supply a deficit: it first needs the very
      * material its parent would produce. Existing stock is consumed directly
      * by search instead. Only normalize fixed, component-free, remainder-free
