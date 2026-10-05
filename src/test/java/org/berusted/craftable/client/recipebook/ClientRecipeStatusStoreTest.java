@@ -152,4 +152,32 @@ class ClientRecipeStatusStoreTest {
         ClientRecipeStatusStore.beginLocal();
         assertTrue(ClientRecipeStatusStore.canRecord(org.berusted.craftable.planner.CraftRequest.one(RECIPE)));
     }
+
+    @Test void certifiedMaterialCeilingDoesNotTurnUnknownVerdictsIntoFailureProof() {
+        ClientRecipeStatusStore.beginLocal();
+        var intent = org.berusted.craftable.planner.CraftRequest.one(RECIPE);
+        ClientRecipeStatusStore.completeLocal(intent, SearchResult.blocked(CraftingResultCode.NO_OUTPUT_SPACE), null, false);
+        ClientRecipeStatusStore.completeLocal(intent.withBatches(2), SearchResult.blocked(CraftingResultCode.CREATED), null, false);
+        ClientRecipeStatusStore.completeLocal(intent.withBatches(3), SearchResult.blocked(CraftingResultCode.SEARCH_BUDGET_EXCEEDED), null, false);
+        var exact = ClientBrowsePlanner.maximumView(intent, 64, 2);
+        assertEquals(2, exact.lowerBound()); assertEquals(64, exact.cap());
+        assertTrue(exact.proven()); assertFalse(exact.pending()); assertFalse(exact.limited());
+        assertTrue(ClientRecipeStatusStore.exhausted(intent.withBatches(3)));
+        assertNull(ClientRecipeStatusStore.evidence(intent.withBatches(3)));
+        // An unknown quantity INSIDE the certificate still prevents precision,
+        // even though a smaller one succeeded and capacity is non-monotone.
+        assertTrue(ClientBrowsePlanner.maximumView(intent, 64, 3).limited());
+        assertFalse(ClientBrowsePlanner.maximumView(intent, 64, 3).proven());
+        assertTrue(ClientBrowsePlanner.maximumView(intent, 64).pending());
+        ClientRecipeStatusStore.beginRefresh();
+        assertTrue(ClientBrowsePlanner.maximumView(intent, 64, 2).pending());
+        ClientRecipeStatusStore.completeLocal(intent.withBatches(32), SearchResult.blocked(CraftingResultCode.CREATED), null, false);
+        var largest = ClientBrowsePlanner.maximumView(intent, 64, 32);
+        assertEquals(32, largest.lowerBound()); assertTrue(largest.proven());
+        assertFalse(largest.pending()); assertFalse(largest.limited());
+        // Lower uncomputed quantities are not implied feasible, but do not
+        // change the MAX once its certified ceiling has a concrete witness.
+        assertFalse(ClientRecipeStatusStore.computed(intent.withBatches(31)));
+        assertTrue(ClientBrowsePlanner.maximumView(intent, 64).pending());
+    }
 }

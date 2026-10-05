@@ -56,6 +56,11 @@ public final class CraftingPlanOverlay extends Screen {
     private boolean localDraft;
     private Object reviewedIdentity;
     private org.berusted.craftable.planner.CraftPlan.Witness submittedWitness;
+    // One bounded replay description belongs to the displayed review. Passive
+    // MAX can replace its sole reusable plan without erasing this description.
+    private org.berusted.craftable.planner.CraftPlan.Witness displayedWitness;
+    private CraftRequest displayedWitnessRequest;
+    private long displayedWitnessScope = -1;
     private long resourceScope = -1;
     private long unavailableSince;
     private boolean fallbackUsed;
@@ -270,6 +275,7 @@ public final class CraftingPlanOverlay extends Screen {
         changedAt = System.nanoTime();
         if (resetMaximum) maximum = null;
         draft = null;
+        clearDisplayedWitness();
         queuedAction = false;
         if (pending != Work.CONFIRM && pending != Work.AUTHORIZE) {
             pending = null; inFlight = -1;
@@ -324,6 +330,7 @@ public final class CraftingPlanOverlay extends Screen {
         if (!valid()) { current = null; return; }
         if (resourceScope != ClientBrowsePlanner.scopeVersion()) {
             resourceScope = ClientBrowsePlanner.scopeVersion();
+            clearDisplayedWitness();
             maximum = null; candidateStates.clear();
             if (pending != Work.CONFIRM && pending != Work.AUTHORIZE) {
                 pending = null; inFlight = -1;
@@ -340,6 +347,7 @@ public final class CraftingPlanOverlay extends Screen {
                 notice = text("unknown_result");
                 dirty = false;
                 draft = null;
+                clearDisplayedWitness();
                 controls();
                 return; // Never auto-resend confirmation.
             }
@@ -358,7 +366,9 @@ public final class CraftingPlanOverlay extends Screen {
             controls(); return;
         }
         unavailableSince = 0;
-        if (System.nanoTime() - sentAt < 200_000_000L) return;
+        // The latest explicit intent is local read-only work. Do not leave it
+        // behind an earlier MAX/card cadence after releasing the slider.
+        if (!dirty && System.nanoTime() - sentAt < 200_000_000L) return;
         if (dirty && System.nanoTime() - changedAt >= 150_000_000L) {
             dirty = false;
             ClientBrowsePlanner.preview(begin(Work.PREVIEW), intent, choicePath);
@@ -380,14 +390,30 @@ public final class CraftingPlanOverlay extends Screen {
     }
 
     public static void receive(CraftingDetailPayloads.PreviewResponse payload) {
-        receive(payload, false);
+        receive(payload, false, null, null, -1);
     }
 
-    public static void receiveLocal(CraftingDetailPayloads.PreviewResponse payload) {
-        receive(payload, true);
+    public static void receiveLocal(CraftingDetailPayloads.PreviewResponse payload, CraftRequest request,
+            org.berusted.craftable.planner.CraftPlan.Witness witness, long scope) {
+        receive(payload, true, request, witness, scope);
     }
 
-    private static void receive(CraftingDetailPayloads.PreviewResponse payload, boolean local) {
+    /** Display data only. Server review and confirmation still validate every
+     * step, source, recipe and current resource version of this untrusted route. */
+    public static org.berusted.craftable.planner.CraftPlan.Witness reviewWitness(CraftRequest request, long scope) {
+        var self = current;
+        return self != null && self.valid() && !self.dirty && self.localDraft && self.draft != null
+                && self.draft.view().complete() && self.draft.view().code() == CraftingResultCode.CREATED && !request.partial()
+                && self.resourceScope == scope && self.displayedWitnessScope == scope
+                && request.equals(self.displayedWitnessRequest) ? self.displayedWitness : null;
+    }
+
+    private void clearDisplayedWitness() {
+        displayedWitness = null; displayedWitnessRequest = null; displayedWitnessScope = -1;
+    }
+
+    private static void receive(CraftingDetailPayloads.PreviewResponse payload, boolean local,
+            CraftRequest request, org.berusted.craftable.planner.CraftPlan.Witness witness, long scope) {
         var self = current;
         if (self == null || !self.accepts(payload.menuId(), payload.revision())) return;
         Work work = self.pending;
@@ -400,7 +426,7 @@ public final class CraftingPlanOverlay extends Screen {
             self.controls();
             return;
         }
-        if (code == CraftingResultCode.REQUEST_THROTTLED) { self.dirty = true; return; }
+        if (code == CraftingResultCode.REQUEST_THROTTLED) { self.clearDisplayedWitness(); self.dirty = true; return; }
         // Show the executable partial frontier directly. This is read-only:
         // only an explicit click authorizes the displayed intent server-side.
         // A complete result switches back to full intent to retain witness
@@ -420,6 +446,11 @@ public final class CraftingPlanOverlay extends Screen {
         }
         boolean sameReview = work == Work.AUTHORIZE && self.reviewedIdentity != null
                 && self.reviewedIdentity.equals(payload.draft().view().reviewIdentity());
+        self.clearDisplayedWitness();
+        if (local && payload.draft().view().complete() && code == CraftingResultCode.CREATED && witness != null
+                && scope == ClientBrowsePlanner.scopeVersion() && scope == self.resourceScope) {
+            self.displayedWitness = witness; self.displayedWitnessRequest = request; self.displayedWitnessScope = scope;
+        }
         self.draft = payload.draft();
         if (local && self.choicePath.equals("0") && !self.outputVariants.isEmpty()) {
             // Root variants are presentation context from the vanilla group.
@@ -584,6 +615,22 @@ public final class CraftingPlanOverlay extends Screen {
             g.fill(14, height - 62, width - 14, height - 51, 0xDD202020);
             g.drawString(font, font.substrByWidth(status, width - 36).getString(), 18, height - 61, 0xFFFFFFFF, false);
         }
+        queueEmbeddedTooltip();
+    }
+
+    private void queueEmbeddedTooltip() {
+        // WidgetTooltipHolder queues on Minecraft.screen, which is the parent
+        // menu. Its renderWithTooltip pass has already ended by Render.Post;
+        // this embedded Screen must own the tooltip's final rendering pass.
+        for (var child : children()) if (child instanceof net.minecraft.client.gui.components.AbstractWidget widget
+                && widget.visible && widget.getTooltip() != null
+                && (widget.isHovered() || widget.isFocused() && minecraft.getLastInputType().isKeyboard())) {
+            var positioner = widget.isHovered()
+                    ? new net.minecraft.client.gui.screens.inventory.tooltip.MenuTooltipPositioner(widget.getRectangle())
+                    : new net.minecraft.client.gui.screens.inventory.tooltip.BelowOrAboveWidgetTooltipPositioner(widget.getRectangle());
+            setTooltipForNextRenderPass(widget.getTooltip(), positioner, true);
+            return;
+        }
     }
 
     private void renderChoice(GuiGraphics g, int mx, int my) {
@@ -727,9 +774,7 @@ public final class CraftingPlanOverlay extends Screen {
             if (count == intent.batches()) return;
             // Do not rebuild the dragged widget: that loses vanilla pointer
             // capture. Only replace the intent; debounce the server request.
-            intent = intent.withBatches(count);
-            generation++; dirty = true; draft = null; queuedAction = false; changedAt = System.nanoTime();
-            controls();
+            change(intent.withBatches(count), false);
         }
         @Override public void onRelease(double x, double y) {
             super.onRelease(x, y);

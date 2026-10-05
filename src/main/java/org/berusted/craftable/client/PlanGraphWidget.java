@@ -60,84 +60,8 @@ final class PlanGraphWidget extends AbstractWidget {
         var raw = new LinkedHashMap<String, PlanView.Node>();
         view.nodes().stream().sorted(java.util.Comparator.comparing(PlanView.Node::path))
                 .forEach(n -> raw.put(n.path(), n));
-        var references = new HashMap<String, java.util.Set<String>>();
-        var sources = new HashMap<String, String>();
-        for (var op : view.operations()) for (int i = 0; i < op.inputs().size(); i++) {
-            int origin = op.inputOrigins().get(i);
-            if (origin >= 0) references.computeIfAbsent(op.path() + "." + i, ignored -> new java.util.HashSet<>())
-                    .add(view.operations().get(origin).path());
-        }
-        // Resolve shared supply before merging equivalent sibling demands.
-        // Equal icons alone never prove shared stock.
-        references.forEach((path, producers) -> {
-            if (producers.size() != 1 || !raw.containsKey(path) || !raw.get(path).made().isEmpty()) return;
-            String producer = producers.iterator().next();
-            if (producer.compareTo(path) >= 0 || !raw.containsKey(producer) || path.startsWith(producer + ".")
-                    || producer.startsWith(path + ".")) return;
-            if (raw.get(path).needs().stream().allMatch(s -> raw.get(producer).made().stream()
-                    .anyMatch(p -> ItemStack.isSameItemSameComponents(s, p)))) sources.put(path, producer);
-        });
-        for (var node : raw.values()) if (!node.reference().isEmpty() && raw.containsKey(node.reference())
-                && !node.reference().startsWith(node.path() + ".") && !node.path().startsWith(node.reference() + "."))
-            sources.put(node.path(), node.reference());
-        var grouped = new LinkedHashMap<String, Cell>();
-        for (var n : raw.values()) {
-            String id = n.path();
-            var cell = grouped.computeIfAbsent(id, ignored -> new Cell(id));
-            cell.owner = parent(n.path());
-            cell.supply = sources.containsKey(n.path()) ? resolve(sources.get(n.path()), sources)
-                    : sources.containsValue(n.path()) ? n.path() : "";
-            cell.paths.add(n.path());
-            n.needs().forEach(s -> merge(cell.needs, s));
-            n.made().forEach(s -> merge(cell.made, s));
-            for (var recipe : n.recipes()) if (!cell.recipes.contains(recipe.toString())) cell.recipes.add(recipe.toString());
-            cell.explanation |= n.explanation();
-            cell.alternatives |= n.alternatives();
-            cell.alternativesKey = alternativeGroups.get(n.path());
-            cell.sharedBatch |= sources.containsKey(n.path()) || sources.containsValue(n.path());
-        }
-        for (var n : raw.values()) {
-            String id = n.path(), parent = parent(n.path());
-            if (!id.equals(parent) && grouped.containsKey(parent) && !grouped.get(parent).children.contains(id))
-                grouped.get(parent).children.add(id);
-        }
-        for (var source : sources.entrySet()) {
-            String demandId = source.getKey(), producerId = resolve(source.getValue(), sources);
-            var demand = grouped.get(demandId);
-            var producer = grouped.get(producerId);
-            if (demand == null || producer == null || producer.children.isEmpty()) continue;
-            for (String recipe : producer.recipes) if (!demand.recipes.contains(recipe)) demand.recipes.add(recipe);
-            // The source's input quantities already cover all consumers. Do
-            // not copy or sum them again, and never turn references into cycles.
-            for (String input : producer.children)
-                if (!demand.children.contains(input) && !reaches(input, demandId, grouped, new java.util.HashSet<>()))
-                    demand.children.add(input);
-        }
+        var grouped = projectMaterials(raw);
         mergeSiblingDemands(grouped);
-        // Different real materials across batches are AND inputs, not an
-        // animated OR icon. Split actual mixed leaves for display only; all
-        // variants retain authoritative paths. Operations remain executable.
-        for (var cell : List.copyOf(grouped.values())) {
-            if (!cell.children.isEmpty() || cell.alternatives || cell.needs.size() <= 1) continue;
-            if (grouped.size() + cell.needs.size() - 1 > PlanView.MAX_NODES) continue;
-            var variants = new ArrayList<String>();
-            variants.add(cell.id);
-            for (int i = 1; i < cell.needs.size(); i++) {
-                var variant = new Cell(cell.id + ":" + i);
-                variant.paths.addAll(cell.paths);
-                variant.needs.add(cell.needs.get(i).copy());
-                variant.explanation = cell.explanation;
-                variant.owner = cell.owner;
-                variant.deviation = true;
-                grouped.put(variant.id, variant); variants.add(variant.id);
-            }
-            var first = cell.needs.getFirst();
-            cell.needs.clear(); cell.needs.add(first);
-            for (var parent : grouped.values()) if (parent.children.contains(cell.id)) {
-                int at = parent.children.indexOf(cell.id);
-                parent.children.remove(at); parent.children.addAll(at, variants);
-            }
-        }
         collapsed.retainAll(grouped.keySet());
         layer(grouped);
         for (var cell : grouped.values()) for (String child : cell.children)
@@ -153,6 +77,200 @@ final class PlanGraphWidget extends AbstractWidget {
             panY = (height - (max - min)) / 2 - min;
         }
         focusedCell = Math.min(focusedCell, Math.max(0, cells.size() - 1));
+    }
+
+    /** Paths are player choices, not production identities. Across batches a
+     * single path can produce several exact wood variants. Split their display
+     * values before resolving origins so one icon never receives another wood's
+     * quantity or upstream inputs. The reviewed operations remain unchanged. */
+    private Map<String, Cell> projectMaterials(Map<String, PlanView.Node> raw) {
+        var grouped = new LinkedHashMap<String, Cell>();
+        var variants = new LinkedHashMap<String, List<Cell>>();
+        var branches = raw.keySet().stream().map(PlanGraphWidget::parent).collect(java.util.stream.Collectors.toSet());
+        int extra = 0;
+        for (var node : raw.values()) {
+            var materials = new ArrayList<ItemStack>();
+            // The first actual production is the route's baseline. Demand
+            // insertion order alone can differ between consumers of that batch.
+            for (var stack : node.made()) addMaterial(materials, stack);
+            for (var stack : node.needs()) addMaterial(materials, stack);
+            boolean split = !node.alternatives() && materials.size() > 1
+                    && (!node.explanation() || !branches.contains(node.path()))
+                    && raw.size() + extra + materials.size() - 1 <= PlanView.MAX_NODES;
+            int count = split ? materials.size() : 1;
+            extra += count - 1;
+            var pathCells = new ArrayList<Cell>();
+            for (int i = 0; i < count; i++) {
+                var cell = new Cell(node.path() + (i == 0 ? "" : ":" + i));
+                cell.owner = parent(node.path()); cell.paths.add(node.path());
+                cell.material = materials.size() == 1 || split ? materials.get(i).copyWithCount(1) : ItemStack.EMPTY;
+                node.needs().stream().filter(s -> !split || sameMaterial(cell, s)).forEach(s -> merge(cell.needs, s));
+                node.made().stream().filter(s -> !split || sameMaterial(cell, s)).forEach(s -> merge(cell.made, s));
+                cell.explanation = node.explanation(); cell.alternatives = node.alternatives();
+                cell.alternativesKey = alternativeGroups.get(node.path());
+                cell.deviation = split && i > 0;
+                for (int op = 0; op < view.operations().size(); op++) {
+                    var operation = view.operations().get(op);
+                    if (operation.path().equals(node.path()) && (!split || sameMaterial(cell, operation.output())))
+                        cell.operations.add(op);
+                }
+                cell.actualRoute = !cell.operations.isEmpty();
+                if (split && !node.made().isEmpty()) {
+                    for (var op : view.operations()) if (op.path().equals(node.path()) && sameMaterial(cell, op.output()))
+                        if (!cell.recipes.contains(op.recipe().toString())) cell.recipes.add(op.recipe().toString());
+                } else node.recipes().forEach(r -> cell.recipes.add(r.toString()));
+                grouped.put(cell.id, cell); pathCells.add(cell);
+            }
+            variants.put(node.path(), pathCells);
+        }
+        // A mixed producer only owns the input variants of its matching real
+        // operations. Attaching every raw child to every variant invents edges.
+        for (var node : raw.values()) {
+            var parents = variants.get(parent(node.path()));
+            if (parents == null) continue;
+            int slot = Integer.parseInt(node.path().substring(node.path().lastIndexOf('.') + 1));
+            for (var consumer : parents) for (var input : variants.get(node.path())) {
+                boolean owns = parents.size() == 1 || view.operations().stream()
+                        .anyMatch(op -> op.path().equals(parent(node.path())) && sameMaterial(consumer, op.output())
+                                && slot < op.inputs().size() && sameMaterial(input, op.inputs().get(slot)));
+                if (owns && !consumer.children.contains(input.id)) {
+                    consumer.children.add(input.id);
+                    // Keep the material-specific producer owner, not the raw
+                    // path's first wood variant, for the later sibling pass.
+                    if (parents.size() > 1) input.owner = consumer.id;
+                }
+            }
+        }
+        var references = new LinkedHashMap<String, java.util.Set<String>>();
+        for (var op : view.operations()) for (int slot = 0; slot < op.inputs().size(); slot++) {
+            int origin = op.inputOrigins().get(slot);
+            if (origin < 0 || op.inputs().get(slot).isEmpty()) continue;
+            var producerOp = view.operations().get(origin);
+            var demand = matching(variants.get(op.path() + "." + slot), op.inputs().get(slot));
+            var producer = matching(variants.get(producerOp.path()), producerOp.output());
+            addReference(references, demand, producer);
+        }
+        for (var node : raw.values()) if (!node.reference().isEmpty())
+            for (var demand : variants.get(node.path()))
+                addReference(references, demand, matching(variants.get(node.reference()), demand.material));
+        var aliases = new HashMap<String, String>();
+        references.forEach((id, producers) -> {
+            var demand = grouped.get(id); demand.sharedBatch = true;
+            if (producers.size() == 1 && demand.made.isEmpty()) aliases.put(id, producers.iterator().next());
+            for (String producer : producers) grouped.get(producer).sharedBatch = true;
+        });
+        for (var cell : grouped.values())
+            cell.supply = aliases.containsKey(cell.id) ? resolve(aliases.get(cell.id), aliases)
+                    : references.values().stream().anyMatch(ids -> ids.contains(cell.id)) ? cell.id : "";
+        for (var reference : references.entrySet()) {
+            var demand = grouped.get(reference.getKey());
+            for (String id : reference.getValue()) {
+                var producer = grouped.get(resolve(id, aliases));
+                if (producer == null || producer == demand) continue;
+                // Consumers can encounter shared materials in opposite order
+                // across batches. Their local insertion order is not a new
+                // baseline; an exact single source owns that decision.
+                if (demand.made.isEmpty() && reference.getValue().size() == 1) demand.deviation = producer.deviation;
+                else demand.deviation |= producer.deviation;
+                if (producer.children.isEmpty()) continue;
+                producer.recipes.forEach(r -> { if (!demand.recipes.contains(r)) demand.recipes.add(r); });
+                demand.actualRoute |= producer.actualRoute;
+                // Reuse existing input cells, never their quantities. Each
+                // extraction/producing batch is counted exactly once.
+                for (String input : producer.children) if (!demand.children.contains(input)
+                        && !reaches(input, demand.id, grouped, new java.util.HashSet<>())) demand.children.add(input);
+            }
+        }
+        mergeSharedInventory(grouped, references);
+        return grouped;
+    }
+
+    /** Reused production can cross demand paths between batches. Its direct
+     * inventory inputs are one resource pool, not independent producers whose
+     * wires can be interpreted as each supplying the other's full quantity.
+     * Only a proved same-output/same-recipe reference group may pool those
+     * leaves. Generated inputs, OR/explanation leaves and unrelated routes
+     * retain their own identities and quantities. */
+    private void mergeSharedInventory(Map<String, Cell> grouped, Map<String, java.util.Set<String>> references) {
+        var peers = new LinkedHashMap<String, java.util.Set<String>>();
+        references.forEach((id, producers) -> {
+            var demand = grouped.get(id);
+            for (String producerId : producers) {
+                var producer = grouped.get(producerId);
+                if (demand == null || producer == null || demand.material.isEmpty() || producer.material.isEmpty()
+                        || demand.explanation || producer.explanation || demand.alternatives || producer.alternatives
+                        || !demand.actualRoute || !producer.actualRoute || demand.recipes.size() != 1
+                        || !demand.recipes.equals(producer.recipes) || !sameMaterial(demand, producer.material)) continue;
+                peers.computeIfAbsent(id, ignored -> new java.util.LinkedHashSet<>()).add(producerId);
+                peers.computeIfAbsent(producerId, ignored -> new java.util.LinkedHashSet<>()).add(id);
+            }
+        });
+        var seen = new java.util.HashSet<String>();
+        var aliases = new HashMap<String, String>();
+        var inventory = new HashMap<String, Boolean>();
+        for (String start : peers.keySet()) {
+            if (!seen.add(start)) continue;
+            var pending = new java.util.ArrayDeque<String>(); pending.add(start);
+            var sources = new java.util.LinkedHashSet<String>();
+            while (!pending.isEmpty()) {
+                String id = pending.removeFirst();
+                var cell = grouped.get(id);
+                if (cell != null) for (String child : cell.children) {
+                    var source = grouped.get(resolve(child, aliases));
+                    if (source != null && inventory.computeIfAbsent(source.id, ignored -> directInventory(source))) sources.add(source.id);
+                }
+                for (String peer : peers.getOrDefault(id, java.util.Set.of())) if (seen.add(peer)) pending.add(peer);
+            }
+            var first = new HashMap<Object, Cell>();
+            for (String sourceId : sources) {
+                var source = grouped.get(sourceId);
+                Object key = CraftPlan.stackKeys(List.of(source.needs.getFirst().copyWithCount(1)));
+                var previous = first.putIfAbsent(key, source);
+                if (previous == null) continue;
+                source.paths.forEach(path -> { if (!previous.paths.contains(path)) previous.paths.add(path); });
+                source.needs.forEach(stack -> merge(previous.needs, stack));
+                aliases.put(source.id, previous.id); grouped.remove(source.id);
+            }
+        }
+        if (aliases.isEmpty()) return;
+        for (var cell : grouped.values()) {
+            cell.owner = resolve(cell.owner, aliases);
+            var children = cell.children.stream().map(id -> resolve(id, aliases)).distinct().toList();
+            cell.children.clear(); cell.children.addAll(children);
+        }
+    }
+
+    private boolean directInventory(Cell cell) {
+        if (cell.explanation || cell.alternatives || cell.material.isEmpty() || cell.needs.size() != 1
+                || !cell.made.isEmpty() || !cell.recipes.isEmpty() || !cell.children.isEmpty() || !cell.operations.isEmpty()) return false;
+        boolean found = false;
+        for (String path : cell.paths) {
+            String owner = parent(path);
+            if (owner.isEmpty()) return false;
+            int slot = Integer.parseInt(path.substring(path.lastIndexOf('.') + 1));
+            for (var operation : view.operations()) if (operation.path().equals(owner)
+                    && slot < operation.inputs().size() && sameMaterial(cell, operation.inputs().get(slot))) {
+                found = true;
+                if (operation.inputOrigins().get(slot) >= 0) return false;
+            }
+        }
+        return found;
+    }
+
+    private static void addMaterial(List<ItemStack> materials, ItemStack stack) {
+        if (materials.stream().noneMatch(s -> ItemStack.isSameItemSameComponents(s, stack))) materials.add(stack.copyWithCount(1));
+    }
+    private static boolean sameMaterial(Cell cell, ItemStack stack) {
+        return cell.material.isEmpty() || ItemStack.isSameItemSameComponents(cell.material, stack);
+    }
+    private static Cell matching(List<Cell> cells, ItemStack stack) {
+        return cells == null ? null : cells.stream().filter(c -> sameMaterial(c, stack)).findFirst().orElse(null);
+    }
+    private static void addReference(Map<String, java.util.Set<String>> references, Cell demand, Cell producer) {
+        if (demand == null || producer == null || demand == producer) return;
+        String source = producer.paths.getFirst(), target = demand.paths.getFirst();
+        if (source.startsWith(target + ".") || target.startsWith(source + ".")) return;
+        references.computeIfAbsent(demand.id, ignored -> new java.util.LinkedHashSet<>()).add(producer.id);
     }
 
     private void separateRows() {
@@ -367,9 +485,12 @@ final class PlanGraphWidget extends AbstractWidget {
                         || reaches(previous.id, cell.id, grouped, new java.util.HashSet<>())) continue;
                 aliases.put(cell.id, previous.id); removed.add(cell.id);
                 previous.paths.addAll(cell.paths);
+                cell.operations.forEach(op -> { if (!previous.operations.contains(op)) previous.operations.add(op); });
                 cell.needs.forEach(s -> merge(previous.needs, s));
                 cell.made.forEach(s -> merge(previous.made, s));
                 previous.sharedBatch |= cell.sharedBatch;
+                previous.deviation |= cell.deviation;
+                previous.actualRoute |= cell.actualRoute;
                 if (!previous.supply.equals(cell.supply)) previous.supply = "";
                 for (String child : cell.children) if (!previous.children.contains(child)) previous.children.add(child);
             }
@@ -401,8 +522,12 @@ final class PlanGraphWidget extends AbstractWidget {
         active.remove(id);
         Object materials = cell.alternatives && cell.alternativesKey != null ? cell.alternativesKey
                 : new java.util.HashSet<>(CraftPlan.stackKeys(cell.needs.stream().map(s -> s.copyWithCount(1)).toList()));
-        Object result = List.of(materials,
-                cell.recipes, cell.explanation, cell.alternatives, children);
+        // A proved single production route can reach the same input through
+        // several batches/consumer origins. Normalize those duplicate shapes,
+        // not quantities. Explanations and mixed recipes keep multiplicity.
+        Object inputs = cell.actualRoute && !cell.explanation && !cell.alternatives && cell.recipes.size() == 1
+                ? new java.util.HashSet<>(children) : children;
+        Object result = List.of(materials, cell.recipes, cell.explanation, cell.alternatives, inputs);
         shapes.put(id, result);
         return result;
     }
@@ -437,7 +562,7 @@ final class PlanGraphWidget extends AbstractWidget {
             g.renderItemDecorations(font, icon, x + 5, y + 5);
             g.pose().pushPose();
             g.pose().translate(0, 0, 250);
-            if (c.deviation || c.recipes.size() > 1 || c.needs.size() > 1 && !c.alternatives)
+            if (additionalMaterial(c))
                 g.drawString(font, "!", x + 22, y - 3, 0xFFFFFF55, false);
             if (collapsed.contains(c.id)) g.drawString(font, "+", x - 7, y + 6, 0xFFFFFFFF, false);
             g.pose().popPose();
@@ -525,7 +650,7 @@ final class PlanGraphWidget extends AbstractWidget {
         var lines = new ArrayList<Component>();
         lines.add(icon(cell).getHoverName());
         if (cell.sharedBatch) lines.add(Component.translatable("screen.craftable.plan.shared_batch"));
-        if (cell.deviation) lines.add(Component.translatable("screen.craftable.plan.additional_material"));
+        if (additionalMaterial(cell)) lines.add(Component.translatable("screen.craftable.plan.additional_material"));
         if (!cell.explanation && !cell.sharedBatch && cell.made.isEmpty() && cell.recipes.isEmpty())
             lines.add(Component.translatable("screen.craftable.plan.existing"));
         if (cell.alternatives && cell.needs.size() > 1) lines.add(Component.translatable("screen.craftable.plan.or"));
@@ -537,7 +662,8 @@ final class PlanGraphWidget extends AbstractWidget {
         var inputs = new ArrayList<ItemStack>();
         var outputs = new ArrayList<ItemStack>();
         var remainders = new ArrayList<ItemStack>();
-        for (var op : view.operations()) if (cell.paths.contains(op.path())) {
+        for (int index : cell.operations) {
+            var op = view.operations().get(index);
             merge(outputs, op.output());
             op.inputs().stream().filter(s -> !s.isEmpty()).forEach(s -> merge(inputs, s));
             op.remainders().stream().filter(s -> !s.isEmpty()).forEach(s -> merge(remainders, s));
@@ -569,11 +695,13 @@ final class PlanGraphWidget extends AbstractWidget {
     private static ItemStack icon(Cell c) {
         var values = !c.needs.isEmpty() ? c.needs : c.made;
         if (values.isEmpty()) return ItemStack.EMPTY;
-        // A mixed intermediate remains one aggregate production node. Its
-        // badge/tooltip explains the variants; the count must include all of
-        // them, not just the first wood type represented by the display icon.
-        return !c.alternatives && values.size() > 1
-                ? values.getFirst().copyWithCount(values.stream().mapToInt(ItemStack::getCount).sum()) : values.getFirst();
+        // If the display cap prevents splitting, the first material retains
+        // its own quantity. Never label a mixed total as one wood variant.
+        return values.getFirst();
+    }
+    private static boolean additionalMaterial(Cell cell) {
+        return cell.deviation || !cell.id.equals("0") && cell.recipes.size() > 1
+                || cell.needs.size() > 1 && !cell.alternatives;
     }
     private static String parent(String path) { int dot = path.lastIndexOf('.'); return dot < 0 ? "" : path.substring(0, dot); }
     private static String resolve(String path, Map<String, String> aliases) {
@@ -589,9 +717,11 @@ final class PlanGraphWidget extends AbstractWidget {
     private static final class Cell {
         final String id;
         final List<String> paths = new ArrayList<>(), recipes = new ArrayList<>(), children = new ArrayList<>();
+        final List<Integer> operations = new ArrayList<>();
         final java.util.Set<String> parents = new java.util.HashSet<>();
         final List<ItemStack> needs = new ArrayList<>(), made = new ArrayList<>();
-        boolean explanation, alternatives, deviation, sharedBatch;
+        ItemStack material = ItemStack.EMPTY;
+        boolean explanation, alternatives, deviation, sharedBatch, actualRoute;
         String owner = "", supply = "";
         Object alternativesKey;
         int x, y, depth, column;

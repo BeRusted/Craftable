@@ -40,6 +40,7 @@ public final class M3ClientSmoke {
     private static int age;
     private static boolean started;
     private static volatile boolean configured;
+    private static volatile String firstCreateOutcome;
     private static long quietSequence;
     private static long previewStart;
     private static final M4RepeatCraftScenario repeatCraft = new M4RepeatCraftScenario();
@@ -119,7 +120,25 @@ public final class M3ClientSmoke {
                 PacketDistributor.sendToServer(new CreateRecipeRequestPayload(STICK, ClientRequestSequence.next()));
                 advance();
             } else if (stage == 4 && age > 40) {
-                require(mc.player.getInventory().countItem(Items.STICK) == 4, "C did not create 4 sticks");
+                if (firstCreateOutcome == null) {
+                    firstCreateOutcome = "pending";
+                    mc.getSingleplayerServer().execute(() -> {
+                        try {
+                            var statesField = org.berusted.craftable.execution.CraftingSessions.class.getDeclaredField("STATES");
+                            statesField.setAccessible(true);
+                            var state = ((java.util.Map<?, ?>) statesField.get(null)).get(serverPlayer().getUUID());
+                            var lastField = state.getClass().getDeclaredField("last");
+                            lastField.setAccessible(true);
+                            firstCreateOutcome = String.valueOf(lastField.get(state));
+                        } catch (ReflectiveOperationException failure) {
+                            firstCreateOutcome = failure.toString();
+                        }
+                    });
+                    return;
+                }
+                if (firstCreateOutcome.equals("pending")) return;
+                require(mc.player.getInventory().countItem(Items.STICK) == 4,
+                        "C did not create 4 sticks: " + firstCreateOutcome);
                 Craftable.LOGGER.warn("M48_RECOVERY status={} reason={} lifecycle={} searches={} builds={}",
                         ClientRecipeStatusStore.get(STICK, false), ClientRecipeStatusStore.reason(STICK),
                         ClientRecipeStatusStore.lifecycle(STICK), org.berusted.craftable.client.recipebook.ClientBrowsePlanner.searches(),

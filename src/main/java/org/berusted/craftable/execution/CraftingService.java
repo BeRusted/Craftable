@@ -187,13 +187,24 @@ public final class CraftingService {
             if (allowance == null) return Outcome.failed(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
             Prepared prepared = witness == null ? prepare(player, request, snapshot, allowance)
                     : prepareWitness(player, request, snapshot, witness, allowance);
+            boolean incompletePartial = !prepared.result().completeSearch()
+                    && prepared.result().plan().filter(CraftPlan::partial).isPresent();
             // Read-only preparation may time out after complete exclusion.
             // Plain C still has a proven material failure; do not turn it into
             // uncertainty or let unfinished diagnostic counts authorize work.
             if (confirmation == null && !request.partial() && prepared.fullMissing()
-                    && prepared.result().code() == CraftingResultCode.SEARCH_BUDGET_EXCEEDED)
+                    && (prepared.result().code() == CraftingResultCode.SEARCH_BUDGET_EXCEEDED || incompletePartial))
                 return Outcome.failed(CraftingResultCode.MISSING_INGREDIENTS);
-            if (prepared.result().code() == CraftingResultCode.SEARCH_BUDGET_EXCEEDED
+            // Material diagnostics remain valid when only their preparation
+            // output will not fit. Plain C does not authorize that preparation.
+            if (confirmation == null && !request.partial() && prepared.fullMissing()
+                    && (prepared.result().code() == CraftingResultCode.NO_OUTPUT_SPACE
+                        || prepared.result().code() == CraftingResultCode.DROP_LIMIT_EXCEEDED))
+                return new Outcome(CraftingResultCode.MISSING_INGREDIENTS, null, prepared.result().missing(), List.of());
+            // A kept full witness proves success despite omitted alternatives.
+            // An incomplete diagnostic frontier must not authorize preparation,
+            // including direct EXPLICIT_SAFE actions that do not use offer().
+            if (incompletePartial || prepared.result().code() == CraftingResultCode.SEARCH_BUDGET_EXCEEDED
                     || prepared.result().plan().isPresent() && exhausted(allowance, remainingNanos))
                 return Outcome.failed(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
             if (confirmation != null && !confirmation.matches(prepared)) {

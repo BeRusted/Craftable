@@ -114,6 +114,7 @@ final class M4GraphPresentationScenario {
         verifyExplanationBranches();
         verifySharedBatches();
         verifyAlignmentBoundaries();
+        M4MixedMaterialScenario.verify();
         M4GraphRoutingScenario.verify();
         System.out.println("M4_GRAPH_PRESENTATION PASS batchTotals=3 siblingPaths=5 missingGold=3 candidateInputs=3+2 tooltipRows/noLF/chestOR=8 selectedWood/rawLeaf/siblingExplanation=preserved");
     }

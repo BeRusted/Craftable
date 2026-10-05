@@ -251,19 +251,57 @@ public final class M48ContinuationGameTests {
     }
 
     @GameTest(templateNamespace = "minecraft", template = EMPTY)
-    public static void largeRetainedStateStopsWithoutPartialAuthorization(GameTestHelper helper) {
+    public static void largeRetainedStateCanKeepAConcreteFullWitness(GameTestHelper helper) {
         var player = M4PlanningGameTests.player(helper);
+        var manager = player.getServer().getRecipeManager();
+        var original = List.copyOf(manager.getRecipes());
         try {
+            // Lazy, shared producer backups no longer make a single wood kind
+            // exceed the memory reserve. A real broad OR input still retains
+            // distinct material bindings; keep the same 16384-source bound.
+            net.minecraft.world.item.Item[] wood = {Items.OAK_LOG, Items.BIRCH_LOG, Items.SPRUCE_LOG, Items.JUNGLE_LOG,
+                    Items.ACACIA_LOG, Items.DARK_OAK_LOG, Items.MANGROVE_LOG, Items.CHERRY_LOG,
+                    Items.CRIMSON_STEM, Items.WARPED_STEM};
+            var plankRecipe = new net.minecraft.world.item.crafting.RecipeHolder<>(ResourceLocation.withDefaultNamespace("oak_planks"),
+                    new net.minecraft.world.item.crafting.ShapelessRecipe("", net.minecraft.world.item.crafting.CraftingBookCategory.BUILDING,
+                            new ItemStack(Items.OAK_PLANKS, 4), net.minecraft.core.NonNullList.of(
+                                    net.minecraft.world.item.crafting.Ingredient.EMPTY,
+                                    net.minecraft.world.item.crafting.Ingredient.of(wood))));
+            manager.replaceRecipes(List.<net.minecraft.world.item.crafting.RecipeHolder<?>>of(manager.byKey(pick().recipe()).orElseThrow(),
+                    manager.byKey(ResourceLocation.withDefaultNamespace("stick")).orElseThrow(), plankRecipe));
             var sources = new java.util.ArrayList<ResourceLedger.Source>();
             for (int i = 0; i < 16383; i++) sources.add(new ResourceLedger.Source("a", i, new ItemStack(Items.OAK_LOG)));
+            for (int i = 1; i < wood.length; i++) {
+                int slot = 16383 - i;
+                sources.set(slot, new ResourceLedger.Source("a", slot, new ItemStack(wood[i])));
+            }
             sources.add(new ResourceLedger.Source("a", 16383, new ItemStack(Items.DIAMOND, 3)));
-            var search = new CraftSearch(new CraftingRecipes(player, true), pick().withPartial(true), sources, logical(), p -> null);
+            var before = CraftPlan.stackKeys(sources.stream().map(ResourceLedger.Source::stack).toList());
+            var recipes = new CraftingRecipes(player, true);
+            var budget = logical();
+            var search = new CraftSearch(recipes, pick().withPartial(true), sources, budget, p -> null);
             var result = search.run();
-            helper.assertValueEqual(result.code(), CraftingResultCode.SEARCH_BUDGET_EXCEEDED, "retained-state bound not enforced");
-            helper.assertTrue(!result.completeSearch() && result.plan().isEmpty() && search.fullEvidence() == null,
-                    "memory truncation authorized partial crafting");
-            helper.assertValueEqual(search.partialSearches(), 0, "memory exhaustion entered partial phase");
-        } finally { M4PlanningGameTests.remove(player); }
+            helper.assertTrue(budget.truncated() && !budget.exhausted(), "fixture did not omit memory-limited backups within its existing state allowance");
+            helper.assertValueEqual(result.code(), CraftingResultCode.CREATED, "memory-limited backups discarded the reachable preferred witness");
+            helper.assertTrue(result.completeSearch() && result.plan().isPresent() && !result.plan().orElseThrow().partial(),
+                    "memory-limited preferred route became a partial/incomplete authorization");
+            helper.assertTrue(search.fullEvidence() == null && search.partialSearches() == 0,
+                    "omitted backups produced a negative proof or entered preparation");
+            var plan = result.plan().orElseThrow();
+            helper.assertTrue(recipes.validate(plan), "retained concrete witness failed authoritative recipe replay");
+            helper.assertValueEqual(plan.extractions().stream().filter(e -> e.expected().is(Items.OAK_LOG))
+                    .mapToInt(CraftPlan.Extraction::count).sum(), 1, "preferred witness consumed extra logs");
+            helper.assertValueEqual(plan.extractions().stream().filter(e -> e.expected().is(Items.DIAMOND))
+                    .mapToInt(CraftPlan.Extraction::count).sum(), 3, "preferred witness lost exact diamond accounting");
+            helper.assertValueEqual(M4PlanningGameTests.count(plan.primary(), Items.DIAMOND_PICKAXE), 1, "preferred witness output");
+            helper.assertValueEqual(M4PlanningGameTests.count(plan.surplus(), Items.OAK_PLANKS), 2, "preferred witness plank surplus");
+            helper.assertValueEqual(M4PlanningGameTests.count(plan.surplus(), Items.STICK), 2, "preferred witness stick surplus");
+            helper.assertValueEqual(CraftPlan.stackKeys(sources.stream().map(ResourceLedger.Source::stack).toList()), before,
+                    "large-source preview mutated a source item, component or count");
+            helper.assertValueEqual(sources.getLast().stack().getCount(), 3, "large-source preview mutated diamonds");
+            helper.assertTrue(player.getInventory().isEmpty(), "large-source planning delivered or consumed real inventory");
+            helper.assertValueEqual(search.initializations(), 1, "memory-limited preferred search restarted its root");
+        } finally { manager.replaceRecipes(original); M4PlanningGameTests.remove(player); }
         helper.succeed();
     }
 

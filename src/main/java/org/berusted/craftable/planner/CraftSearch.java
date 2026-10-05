@@ -11,6 +11,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -42,16 +44,20 @@ public final class CraftSearch {
     private List<CraftPlan.Missing> bestMissing = List.of();
     private int bestProgress = -1;
     private int bestBindings = -1;
+    private CapacityDiagnosis capacityDiagnosis;
     private enum Phase { START, EXISTING, CLOSURE, FULL, PARTIAL, DONE }
     private Phase phase = Phase.START;
     private Entry root;
     private SearchResult completed;
-    private final ArrayDeque<State> frontier = new ArrayDeque<>();
+    private final ArrayDeque<Branch> frontier = new ArrayDeque<>();
     private final Set<Object> visited = new HashSet<>();
     private final Set<Object> completedPrefixes = new HashSet<>();
     private boolean partialMode, existingOnly;
     private int initializations;
     private boolean unsupportedRelation;
+    private boolean stepBoundChecked;
+    private boolean wantsMaterialUpperBound, materialUpperBoundChecked;
+    private java.util.OptionalInt materialUpperBound = java.util.OptionalInt.empty();
     // Conservative retained-state estimate, not a JVM heap measurement. Two
     // continuations must still leave room for snapshot/results in a 16 MiB session.
     private static final long MAX_RETAINED_BYTES = 4L * 1024 * 1024;
@@ -77,6 +83,15 @@ public final class CraftSearch {
     public CraftSearch withReachability(Reachability shared) {
         requireNotStarted(); this.shared = java.util.Objects.requireNonNull(shared); return this;
     }
+
+    /** Optional MAX presentation certificate, charged to this same search.
+     * It neither supplies a plan nor proves this request's full failure. */
+    public CraftSearch withMaterialUpperBound() {
+        wantsMaterialUpperBound = true;
+        return this;
+    }
+    public java.util.OptionalInt materialUpperBound() { return materialUpperBound; }
+    public boolean materialUpperBoundAttempted() { return materialUpperBoundChecked; }
     public static final class Reachability {
         private Set<Item> value;
         private int builds;
@@ -162,6 +177,14 @@ public final class CraftSearch {
         charged.beginSlice(nanos);
         try {
             if (!charged.alive()) return finish(limited());
+            if (!stepBoundChecked && phase == Phase.EXISTING) {
+                stepBoundChecked = true;
+                if (exceedsStepLimit()) {
+                    // This is a representation bound, not a material denial
+                    // or permission to execute an unfinished preparation.
+                    budget.truncate(); return finish(limited());
+                }
+            }
             if (phase == Phase.CLOSURE) {
                 long start = System.nanoTime();
                 boolean ready;
@@ -170,6 +193,13 @@ public final class CraftSearch {
                 if (charged.truncated()) return finish(limited());
                 if (ready) { reachable = shared.value; beginSearch(Phase.FULL); }
                 return Optional.empty();
+            }
+            if (wantsMaterialUpperBound && !materialUpperBoundChecked && phase == Phase.FULL && shared.value != null) {
+                materialUpperBoundChecked = true;
+                // Its transient maps share the solver's retained-memory cap;
+                // inability to reserve them merely omits this optimization.
+                if (frontierBytes + memoBytes + MaterialUpperBound.MAX_RETAINED_BYTES <= MAX_RETAINED_BYTES)
+                    materialUpperBound = MaterialUpperBound.compute(recipes, request, initial, shared.value, charged);
             }
             CraftPlan plan = search();
             if (plan != null) return finish(success(plan));
@@ -186,6 +216,9 @@ public final class CraftSearch {
                 // Structural/time truncation never produces negative evidence.
                 fullEvidence = new FullEvidence(shared, request);
                 beginPartial();
+            } else if (phase == Phase.PARTIAL && capacityDiagnosis != null) {
+                return finish(new SearchResult(capacityDiagnosis.code(), Optional.empty(), capacityDiagnosis.missing(),
+                        true, visitedStates()));
             } else return finish(new SearchResult(failure, Optional.empty(), bestMissing, true, visitedStates()));
             return Optional.ofNullable(completed);
         } finally { charged.endSlice(); }
@@ -220,7 +253,7 @@ public final class CraftSearch {
 
     private SearchResult limited() {
         return new SearchResult(unsupportedRelation ? CraftingResultCode.UNSUPPORTED_RECIPE : CraftingResultCode.SEARCH_BUDGET_EXCEEDED, Optional.empty(),
-                bestMissing, false, visitedStates());
+                capacityDiagnosis == null ? bestMissing : capacityDiagnosis.missing(), false, visitedStates());
     }
 
     public int visitedStates() { return fullBudget.states() + (budget == fullBudget ? 0 : budget.states()); }
@@ -243,8 +276,9 @@ public final class CraftSearch {
 
     private CraftPlan search() {
         while (!frontier.isEmpty() && budget.canContinue() && budget.enter()) {
-            State state = frontier.pop();
-            frontierBytes -= state.retainedBytes();
+            Branch next = frontier.pop();
+            frontierBytes -= next.retainedBytes();
+            State state = next.materialize();
             if (state.tasks.isEmpty()) {
                 if (state.rejected != null) { remember(state); continue; }
                 if (state.steps.isEmpty() || state.ledger.delivery(true).isEmpty()) {
@@ -259,7 +293,18 @@ public final class CraftSearch {
                 // Keep this exact accounting check shared with witness replay.
                 if (!plan.hasMaterialChange()) continue;
                 CraftingResultCode invalid = validateDelivery.apply(plan);
-                if (invalid == null) return plan;
+                if (invalid == null) {
+                    // Capacity may select another real route, but cannot make
+                    // deliberately omitted materials a better preparation.
+                    if (partialMode && capacityDiagnosis != null
+                            && addsMissing(plan.missing(), capacityDiagnosis.missing())) continue;
+                    return plan;
+                }
+                if (partialMode && (invalid == CraftingResultCode.NO_OUTPUT_SPACE
+                        || invalid == CraftingResultCode.DROP_LIMIT_EXCEEDED)) {
+                    if (capacityDiagnosis == null || addsMissing(capacityDiagnosis.missing(), plan.missing()))
+                        capacityDiagnosis = new CapacityDiagnosis(invalid, plan.missing());
+                }
                 failure = invalid;
                 continue;
             }
@@ -270,8 +315,9 @@ public final class CraftSearch {
                 // not replay the same exhausted inventory exponentially.
                 // Partial preparation keeps its stricter history-sensitive key.
                 if (!partialMode && state.grids.isEmpty() && state.active.isEmpty()) {
-                    Object identity = List.of(state.completed, state.steps.size(), state.ledger.batchBoundaryIdentity());
-                    if (!rememberIdentity(completedPrefixes, identity, state.ledger.identityBytes(), state)) continue;
+                    if (!rememberIdentity(completedPrefixes,
+                            () -> List.of(state.completed, state.steps.size(), state.ledger.batchBoundaryIdentity()),
+                            state.ledger.identityBytes(), state)) continue;
                 }
                 expandRecipe(state, r.recipe, "0", 0, null);
                 push(state);
@@ -335,27 +381,27 @@ public final class CraftSearch {
                 // this OR-ingredient's item. Otherwise another branch's oak
                 // surplus could silently bypass the user's explicit choice.
                 Need need = selected == null ? originalNeed : new Need(Ingredient.of(selected.output()),
-                        originalNeed.grid, originalNeed.slot, originalNeed.path, originalNeed.depth);
-                // Include unfinished bindings/active recipes in the memo key;
-                // item ID alone incorrectly rejects seeded ingot/nugget paths.
-                var existing = state.ledger.choices(need.ingredient);
-                // A deterministic existing-only grid has no alternate state
-                // to revisit. Avoid boxing thousands of source counters for
-                // each slot in a full storage-room inventory.
-                if (!existingOnly || existing.size() > 1) {
-                    Object identity = state.identity(need);
-                    if (!rememberIdentity(visited, identity, state.ledger.identityBytes() + state.tasks.size() * 128L
-                            + state.grids.size() * 256L + state.steps.size() * 128L, state)) continue;
-                }
-                List<State> branches = new ArrayList<>();
+                        originalNeed.grid, originalNeed.slot, originalNeed.path, originalNeed.depth, originalNeed.producersOnly);
+                var existing = need.producersOnly ? List.<ResourceLedger.Taken>of() : state.ledger.choices(need.ingredient);
+                // Keep the concrete preferred continuation in place. Backups
+                // must be copied from the untouched preimage, but inability to
+                // retain another backup must never discard this first route.
+                Consumer<State> preferred = null;
+                List<Consumer<State>> branches = new ArrayList<>();
                 for (var taken : existing) {
+                    if (preferred == null) { preferred = s -> bind(s, need, taken); continue; }
                     if (!canFork(state, branches.size())) break;
-                    State branch = state.copy();
-                    bind(branch, need, taken);
-                    branches.add(branch);
+                    branches.add(s -> bind(s, need, taken));
                 }
-                List<Entry> candidates = existingOnly ? new ArrayList<>() : new ArrayList<>(recipes.producing(need.ingredient));
-                if (!existingOnly && recipes.hasUnsupportedProducer(need.ingredient)) {
+                boolean deferProducers = !existingOnly && !partialMode && !existing.isEmpty();
+                if (deferProducers && (!recipes.producing(need.ingredient).isEmpty() || recipes.hasUnsupportedProducer(need.ingredient))
+                        && canFork(state, branches.size()))
+                    branches.add(s -> s.tasks.addFirst(new Need(need.ingredient, need.grid, need.slot, need.path, need.depth, true)));
+                // Ranking every producer of every already-bound surplus slot
+                // is wasteful. The fallback owns the same preimage and ranks
+                // them only if existing stock really fails downstream.
+                List<Entry> candidates = existingOnly || deferProducers ? new ArrayList<>() : new ArrayList<>(recipes.producing(need.ingredient));
+                if (!existingOnly && !deferProducers && recipes.hasUnsupportedProducer(need.ingredient)) {
                     // Omitting unknown predicates must not prove impossibility
                     // and thereby authorize partial consumption. A known full
                     // witness may still succeed; absence remains unproven.
@@ -382,6 +428,13 @@ public final class CraftSearch {
                     // an otherwise unlocked target's useful preparation.
                     if (!candidate.requirements().stream().allMatch(r -> java.util.Arrays.stream(r.ingredient().getItems())
                             .anyMatch(s -> reachable.contains(s.getItem())))) continue;
+                    // A fixed raw input with neither producer nor possible
+                    // return cannot be supplied by this branch after its stock
+                    // runs out. This excludes only that concrete producer;
+                    // alternate reservations still live in the frontier.
+                    if (!partialMode && candidate.requirements().stream().anyMatch(r -> !state.ledger.has(r.ingredient())
+                            && recipes.producing(r.ingredient()).isEmpty()
+                            && !recipes.hasUnsupportedProducer(r.ingredient()) && !recipes.mayReturn(r.ingredient()))) continue;
                     var denied = recipes.unavailable(candidate);
                     if (denied != null) {
                         permissionBlocked = true;
@@ -393,50 +446,75 @@ public final class CraftSearch {
                         budget.truncate();
                         break;
                     }
-                    if (!canFork(state, branches.size())) break;
-                    State branch = state.copy();
-                    expandRecipe(branch, candidate, need.path, need.depth, need);
-                    branches.add(branch);
-                }
-                if ((partialMode && existing.isEmpty()) || branches.isEmpty()) {
-                    if (!canFork(state, branches.size())) continue;
-                    State missing = state.copy();
-                    missing.grids.get(need.grid).missing = true;
-                    missing.missing.add(missing(need));
-                    if (branches.isEmpty() && (permissionBlocked || state.ledger.hasProtected(need.ingredient))) {
-                        missing.rejected = state.ledger.hasProtected(need.ingredient)
-                                ? CraftingResultCode.PROTECTED_INGREDIENTS : blockedReason;
+                    if (preferred == null) {
+                        preferred = s -> expandRecipe(s, candidate, need.path, need.depth, need);
+                        continue;
                     }
+                    if (!canFork(state, branches.size())) break;
+                    branches.add(s -> expandRecipe(s, candidate, need.path, need.depth, need));
+                }
+                if ((partialMode && existing.isEmpty()) || preferred == null) {
+                    var rejected = preferred == null && (permissionBlocked || state.ledger.hasProtected(need.ingredient))
+                            ? state.ledger.hasProtected(need.ingredient) ? CraftingResultCode.PROTECTED_INGREDIENTS : blockedReason
+                            : null;
+                    Consumer<State> markMissing = s -> {
+                        s.grids.get(need.grid).missing = true;
+                        s.missing.add(missing(need));
+                        if (rejected != null) s.rejected = rejected;
+                    };
                     // Partial diagnostics must finish all sibling/root demands;
                     // an intermediate failure has neither final items nor counts.
-                    if (!partialMode) remember(missing);
-                    if (partialMode) branches.add(missing);
+                    if (preferred == null) {
+                        if (partialMode) preferred = markMissing;
+                        else { markMissing.accept(state); remember(state); continue; }
+                    } else if (canFork(state, branches.size())) {
+                        branches.add(markMissing);
+                    }
                 }
-                // Keep the preferred prefix (existing stock, then cheapest
-                // producer), not the tail just because pushing is reversed.
+                // Avoid copying the entire history for every single-material
+                // FULL surplus slot. Omitting this optimization key may spend
+                // extra states, never remove an alternative or grant a proof.
+                // Multi-material assignments/partial preparation keep the full
+                // key; complete batch prefixes are memoized independently.
+                if (!branches.isEmpty() && (partialMode || existing.size() > 1)
+                        && !rememberIdentity(visited, () -> state.identity(need),
+                        state.ledger.identityBytes() + state.tasks.size() * 128L
+                                + state.grids.size() * 256L + state.steps.size() * 128L, state)) continue;
+                // All deferred alternatives share one immutable preimage.
+                // Clone/expand only the branch actually visited, rather than
+                // all producers of every already-available ingredient slot.
+                State preimage = branches.isEmpty() ? null : state.copy();
+                preferred.accept(state);
+                // Reserve the preferred route before admitting any backups.
+                // Its growth can evict only the lowest-priority old backups;
+                // omissions invalidate negative evidence, not a full witness.
+                if (!makeRoom(state)) continue;
                 int kept = 0;
-                long room = MAX_RETAINED_BYTES - frontierBytes - memoBytes;
-                while (kept < branches.size() && kept < SearchBudget.MAX_FRONTIER - frontier.size()) {
-                    long bytes = branches.get(kept).retainedBytes();
+                long room = MAX_RETAINED_BYTES - frontierBytes - memoBytes - state.retainedBytes();
+                while (kept < branches.size() && kept < SearchBudget.MAX_FRONTIER - frontier.size() - 1) {
+                    long bytes = new Branch(preimage, branches.get(kept)).retainedBytes();
                     if (bytes > room) break;
                     room -= bytes;
                     kept++;
                 }
                 if (kept < branches.size()) budget.truncate();
                 for (int i = kept - 1; i >= 0; i--) {
-                    push(branches.get(i));
+                    retain(new Branch(preimage, branches.get(i)));
                 }
+                retain(new Branch(state, null));
             }
         }
         return null;
     }
 
-    private boolean rememberIdentity(Set<Object> identities, Object identity, long bytes, State current) {
-        if (identities.contains(identity)) return false;
+    private boolean rememberIdentity(Set<Object> identities, Supplier<Object> identity, long bytes, State current) {
         if (frontierBytes + memoBytes + current.retainedBytes() + bytes > MAX_RETAINED_BYTES) {
-            budget.truncate(); return false;
+            // Memoization is an optimization, not a prerequisite for completing
+            // a concrete route. Avoid even allocating a large rejected key.
+            budget.truncate(); return true;
         }
-        identities.add(identity);
+        Object key = identity.get();
+        if (!identities.add(key)) return false;
         memoBytes += bytes;
         return true;
     }
@@ -449,12 +527,46 @@ public final class CraftSearch {
     }
 
     private void push(State state) {
+        if (makeRoom(state)) retain(new Branch(state, null));
+    }
+
+    private boolean makeRoom(State state) {
         long bytes = state.retainedBytes();
-        if (frontier.size() >= SearchBudget.MAX_FRONTIER || frontierBytes + memoBytes + bytes > MAX_RETAINED_BYTES) {
-            budget.truncate(); return;
+        while (!frontier.isEmpty() && (frontier.size() >= SearchBudget.MAX_FRONTIER
+                || frontierBytes + memoBytes + bytes > MAX_RETAINED_BYTES)) {
+            frontierBytes -= frontier.removeLast().retainedBytes();
+            budget.truncate();
         }
-        frontier.push(state);
-        frontierBytes += bytes;
+        if (memoBytes + bytes > MAX_RETAINED_BYTES) {
+            // The retained current state may grow after a recipe finishes.
+            // Releasing optimization keys preserves the hard memory bound;
+            // the same cumulative CPU/state/depth limits still terminate it.
+            visited.clear(); completedPrefixes.clear(); memoBytes = 0;
+            budget.truncate();
+        }
+        if (frontier.size() >= SearchBudget.MAX_FRONTIER || frontierBytes + memoBytes + bytes > MAX_RETAINED_BYTES) {
+            budget.truncate(); return false;
+        }
+        return true;
+    }
+
+    private void retain(Branch branch) {
+        frontier.push(branch);
+        frontierBytes += branch.retainedBytes();
+    }
+
+    private record Branch(State preimage, Consumer<State> choice) {
+        long retainedBytes() {
+            // Repeatedly charge the shared immutable preimage. Also reserve a
+            // producer grid/ledger/task expansion before it is materialized.
+            return preimage.retainedBytes() + (choice == null ? 0 : 4096L + preimage.ledger.retainedBytes());
+        }
+        State materialize() {
+            if (choice == null) return preimage;
+            State state = preimage.copy();
+            choice.accept(state);
+            return state;
+        }
     }
 
     private void expandRecipe(State state, Entry recipe, String path, int depth, Need parent) {
@@ -492,6 +604,36 @@ public final class CraftSearch {
         state.ledger.take(taken);
         state.grids.get(need.grid).taken[need.slot] = taken;
         state.bindings++;
+    }
+
+    /** Necessary operation count only. Each root needs one operation; a fixed
+     * repeated ingredient needs at least ceil(shortfall / largest output) more.
+     * Returns/unknown producers disable the bound, and overlapping ingredient
+     * groups are checked separately, never added. No route is constructed and
+     * passing this test proves neither materials nor delivery feasibility. */
+    private boolean exceedsStepLimit() {
+        // This particular lower bound cannot exceed one root operation plus
+        // one direct producer per root slot. Small requests need no producer
+        // enumeration/source scan here; the actual search still enforces all
+        // upstream steps and passing this check authorizes nothing.
+        if ((long) request.batches() * (1 + root.requirements().size()) <= SearchBudget.MAX_STEPS) return false;
+        var groups = new LinkedHashMap<Object, Ingredient>();
+        var counts = new HashMap<Object, Integer>();
+        for (var demand : root.requirements()) {
+            Object key = Set.copyOf(java.util.Arrays.stream(demand.ingredient().getItems()).map(ResourceLedger.Key::of).toList());
+            groups.putIfAbsent(key, demand.ingredient());
+            counts.merge(key, 1, Math::addExact);
+        }
+        for (var group : groups.entrySet()) {
+            var ingredient = group.getValue();
+            if (recipes.hasUnsupportedProducer(ingredient) || recipes.mayReturn(ingredient)) continue;
+            int largest = recipes.producing(ingredient).stream().mapToInt(e -> e.output().getCount()).max().orElse(0);
+            if (largest == 0) continue;
+            long shortfall = (long) counts.get(group.getKey()) * request.batches() - initial.quantity(ingredient);
+            long operations = request.batches() + (Math.max(0, shortfall) + largest - 1) / largest;
+            if (operations > SearchBudget.MAX_STEPS) return true;
+        }
+        return false;
     }
 
     private int estimatedMissing(Entry entry, ResourceLedger ledger) {
@@ -560,9 +702,35 @@ public final class CraftSearch {
         return List.copyOf(result.values());
     }
 
+    /** Strictly more of the same shortages, possibly with extra materials.
+     * Different ingredient choices remain incomparable: they can still be a
+     * legitimate route whose surplus fits when the preferred route does not. */
+    private static boolean addsMissing(List<CraftPlan.Missing> candidate, List<CraftPlan.Missing> baseline) {
+        var next = missingCounts(candidate);
+        var previous = missingCounts(baseline);
+        boolean additional = next.size() > previous.size();
+        for (var entry : previous.entrySet()) {
+            int count = next.getOrDefault(entry.getKey(), 0);
+            if (count < entry.getValue()) return false;
+            additional |= count > entry.getValue();
+        }
+        return additional;
+    }
+
+    private static Map<Object, Integer> missingCounts(List<CraftPlan.Missing> missing) {
+        var counts = new HashMap<Object, Integer>();
+        for (var item : missing) counts.merge(Set.copyOf(item.alternatives().stream().map(ResourceLedger.Key::of).toList()),
+                item.count(), Math::addExact);
+        return counts;
+    }
+
+    private record CapacityDiagnosis(CraftingResultCode code, List<CraftPlan.Missing> missing) {}
+
     private sealed interface Task permits Root, Need, Finish, Supply {}
     private record Root(Entry recipe) implements Task {}
-    private record Need(Ingredient ingredient, int grid, int slot, String path, int depth) implements Task {}
+    private record Need(Ingredient ingredient, int grid, int slot, String path, int depth, boolean producersOnly) implements Task {
+        Need(Ingredient ingredient, int grid, int slot, String path, int depth) { this(ingredient, grid, slot, path, depth, false); }
+    }
     private record Finish(Entry recipe, int grid, String path, boolean root) implements Task {}
     private record Supply(Need need, int producer) implements Task {}
 

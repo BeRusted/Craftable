@@ -45,6 +45,7 @@ public final class M4ClientSmoke {
     private static boolean started;
     private static boolean oldPauseOnLostFocus;
     private static boolean queuedCancellationChecked;
+    private static long queuedCancellationWitnesses, queuedCancellationFull, queuedCancellationPartial;
     private static volatile boolean configured;
     private static Object menu;
     private static int oldScale, oldWidth, oldHeight;
@@ -52,6 +53,8 @@ public final class M4ClientSmoke {
     private static long previewStart;
     private static final M4BrowsingScenario browsing = new M4BrowsingScenario();
     private static final M4OutputVariantScenario outputVariants = new M4OutputVariantScenario();
+    private static final M4DetailQuantityScenario detailQuantity = new M4DetailQuantityScenario();
+    private static final M4BulkQuantityScenario bulkQuantity = new M4BulkQuantityScenario();
     private static long serverDetails;
     private static long witnessBefore, fullSearchesBefore;
     private static int reviewMismatchPhase;
@@ -59,6 +62,29 @@ public final class M4ClientSmoke {
     private static final java.util.List<Long> timings = new java.util.ArrayList<>();
     private static final BlockPos CHEST = new BlockPos(1, -60, 1);
     private static final ResourceLocation PICK = ResourceLocation.withDefaultNamespace("diamond_pickaxe");
+
+    // A MAX certificate can finish in the same Post event in which the
+    // overlay asks for it. Drive the ordinary overlay tick before the planner
+    // callback and inspect its real pending request synchronously; the fixture
+    // must not require a calculation to remain slow for a whole game tick.
+    @SubscribeEvent(priority = net.neoforged.bus.api.EventPriority.HIGHEST)
+    public static void observeQueuedCancellation(ClientTickEvent.Post event) {
+        if (!Boolean.getBoolean("craftable.m4Smoke") || stage != 19 || queuedCancellationChecked) return;
+        var mc = Minecraft.getInstance();
+        try {
+            var self = overlay();
+            if (self == null || draft() == null || draft().view().code() != CraftingResultCode.CREATED
+                    || (boolean) field(self, "dirty")) return;
+            self.tick(); // Uses the real debounce, request identity and local MAX scheduler.
+            if (field(self, "pending") != null && field(self, "pending").toString().equals("MAXIMUM"))
+                cancelQueuedMaximum(mc);
+        } catch (Throwable error) {
+            Craftable.LOGGER.error("M4_SMOKE FAIL stage " + stage, error);
+            stage = -1;
+            restoreOptions();
+            mc.stop();
+        }
+    }
 
     // Observe after the overlay has sent this tick's request. At the same
     // priority a fast integrated-server reply can arrive before our next tick,
@@ -92,7 +118,7 @@ public final class M4ClientSmoke {
                     && field(overlay(), "pending") != null && field(overlay(), "pending").toString().equals("MAXIMUM")
                     && Boolean.FALSE.equals(field(overlay(), "queuedAction")))
                 require(((Button) field(overlay(), "create")).active, "MAX slice blinked the confirm button");
-            if (++age > (stage == 3 ? 1400 : 600)) throw new AssertionError("Timeout at stage " + stage + ", pending="
+            if (++age > (stage == 3 || stage == 30 ? 1400 : 600)) throw new AssertionError("Timeout at stage " + stage + ", pending="
                     + (overlay() == null ? "closed" : field(overlay(), "pending") + ", max=" + field(overlay(), "maximum")
                     + ", dirty=" + field(overlay(), "dirty") + ", draft=" + (draft() == null ? "none" : draft().view().code())));
             if (stage <= 3) setupAndBrowse(mc);
@@ -311,7 +337,14 @@ public final class M4ClientSmoke {
                 click(create.getX() + 5, create.getY() + 5);
                 next();
             } else if (stage == 12 && age > 30 && ready()) {
-                require(mc.player.getInventory().countItem(Items.STICK) == 4, "Partial did not deliver one whole stick batch");
+                if (mc.player.getInventory().countItem(Items.STICK) != 4) shot("partial-failed");
+                require(mc.player.getInventory().countItem(Items.STICK) == 4,
+                        "Partial did not deliver one whole stick batch: code=" + draft().view().code()
+                                + ", token=" + draft().token() + ", local=" + field(overlay(), "localDraft")
+                                + ", pane=" + field(overlay(), "pane") + ", routeChanged=" + field(overlay(), "routeChanged")
+                                + ", notice=" + ((net.minecraft.network.chat.Component) field(overlay(), "notice")).getString()
+                                + ", fullSearches=" + executionCounter("activeFullSearches")
+                                + ", partialSearches=" + executionCounter("activePartialSearches"));
                 require(mc.player.getInventory().countItem(Items.DIAMOND_PICKAXE) == 0, "Partial fabricated root");
                 require(!((Button) field(overlay(), "create")).active, "Existing frontier allowed redundant partial");
                 shot("partial-completed");
@@ -362,7 +395,7 @@ public final class M4ClientSmoke {
                 // demands. Check their total needs and real production rather
                 // than inferring quantities from the number of display nodes.
                 int plankNeeds = 0, plankMade = 0;
-                boolean connected = false;
+                int connectedVariants = 0;
                 for (var cell : cells) {
                     for (var stack : (List<ItemStack>) field(cell, "needs"))
                         if (stack.is(Items.OAK_PLANKS) || stack.is(Items.BIRCH_PLANKS)) plankNeeds += stack.getCount();
@@ -370,14 +403,31 @@ public final class M4ClientSmoke {
                         if (stack.is(Items.OAK_PLANKS) || stack.is(Items.BIRCH_PLANKS)) plankMade += stack.getCount();
                 }
                 require(plankNeeds == 12 && plankMade == 12, "Mixed shared demands lost total needs or real production");
-                for (var cell : cells) if (((List<?>) field(cell, "children")).containsAll(materialIds)) {
-                    connected = true;
+                for (var cell : cells) {
+                    var needs = (List<ItemStack>) field(cell, "needs");
+                    if (needs.stream().noneMatch(s -> s.is(Items.OAK_PLANKS) || s.is(Items.BIRCH_PLANKS))) continue;
+                    require(needs.size() == 1, "Mixed production still labels several materials as one wood");
+                    var wood = needs.getFirst();
+                    var source = wood.is(Items.OAK_PLANKS) ? Items.OAK_LOG : Items.BIRCH_LOG;
+                    int expected = wood.is(Items.OAK_PLANKS) ? 8 : 4;
+                    require(wood.getCount() == expected, "Mixed wood variant lost exact demand quantity");
+                    var children = (List<String>) field(cell, "children");
+                    require(children.size() == 1 && materialIds.contains(children.getFirst()), "Mixed wood has missing or duplicate source edges");
+                    var child = cells.stream().filter(c -> {
+                        try { return field(c, "id").equals(children.getFirst()); }
+                        catch (Exception failure) { throw new AssertionError(failure); }
+                    }).findFirst().orElseThrow();
+                    var inputs = (List<ItemStack>) field(child, "needs");
+                    require(inputs.size() == 1 && inputs.getFirst().is(source) && inputs.getFirst().getCount() == expected / 4,
+                            "Mixed wood connected to another material's log");
                     var icon = PlanGraphWidget.class.getDeclaredMethod("icon", cell.getClass());
                     icon.setAccessible(true);
-                    int demand = ((List<ItemStack>) field(cell, "needs")).stream().mapToInt(ItemStack::getCount).sum();
-                    require(((ItemStack) icon.invoke(null, cell)).getCount() == demand, "Mixed plank icon hides another material's count");
+                    var displayed = (ItemStack) icon.invoke(null, cell);
+                    require(ItemStack.isSameItemSameComponents(displayed, wood) && displayed.getCount() == expected,
+                            "Mixed plank icon uses another material's identity or quantity");
+                    connectedVariants++;
                 }
-                require(connected, "Mixed inputs not connected to shared production node");
+                require(connectedVariants == 2, "Mixed inputs not connected to separate exact production variants");
                 shot("mixed-graph");
                 var create = (Button) field(overlay(), "create");
                 click(create.getX() + 5, create.getY() + 5);
@@ -393,7 +443,16 @@ public final class M4ClientSmoke {
                 require(mc.player.getInventory().countItem(Items.STICK) == 24, "Mixed MAX did not yield 24 sticks");
                 key(256, 0);
                 configured = false;
-                mc.getSingleplayerServer().execute(() -> { stock(true); configured = true; });
+                mc.getSingleplayerServer().execute(() -> {
+                    stock(true);
+                    var chest = (ChestBlockEntity) serverPlayer().serverLevel().getBlockEntity(CHEST);
+                    // A fresh resource scope has uncomputed multi-pick
+                    // quantities, rather than the old cap-one cached MAX.
+                    chest.setItem(0, new ItemStack(Items.OAK_LOG, 64));
+                    chest.setItem(1, new ItemStack(Items.DIAMOND, 64));
+                    chest.setChanged();
+                    configured = true;
+                });
                 next();
             } else if (stage == 18 && configured && age > 30) {
                 CraftingPlanOverlay.open(mc.screen, PICK, false);
@@ -401,16 +460,14 @@ public final class M4ClientSmoke {
             } else if (stage == 19 && !queuedCancellationChecked && draft() != null
                     && draft().view().code() == CraftingResultCode.CREATED
                     && field(overlay(), "pending") != null && field(overlay(), "pending").toString().equals("MAXIMUM")) {
-                var create = (Button) field(overlay(), "create");
-                click(create.getX() + 5, create.getY() + 5);
-                require(Boolean.TRUE.equals(field(overlay(), "queuedAction")), "MAX click was lost instead of queued once");
-                key(256, 0);
-                require(!CraftingPlanOverlay.active(), "Esc did not cancel waiting action");
-                queuedCancellationChecked = true;
-                CraftingPlanOverlay.open(mc.screen, PICK, false);
+                cancelQueuedMaximum(mc);
             } else if (stage == 19 && ready()) {
                 require(queuedCancellationChecked, "Real in-flight MAX cancellation was not exercised");
                 require(mc.player.getInventory().countItem(Items.DIAMOND_PICKAXE) == 0, "Canceled queued click still crafted");
+                require(executionCounter("witnessValidations") == queuedCancellationWitnesses
+                        && executionCounter("activeFullSearches") == queuedCancellationFull
+                        && executionCounter("activePartialSearches") == queuedCancellationPartial,
+                        "Canceled queued click reached authoritative preparation after Esc");
                 mc.options.guiScale().set(1); mc.resizeDisplay();
                 next();
             }
@@ -482,7 +539,11 @@ public final class M4ClientSmoke {
                 shot("config-client");
                 next();
             } else if (stage == 28 && outputVariants.tick(mc)) {
-                Craftable.LOGGER.warn("M4_SMOKE PASS: real Shift+C, candidates/pin, mixed MAX/slider/cost review, full/partial, GUI scales 1/2/3, zh/en, detail latency, menu/mode isolation");
+                next();
+            } else if (stage == 29 && detailQuantity.tick(mc)) {
+                next();
+            } else if (stage == 30 && bulkQuantity.tick(mc)) {
+                Craftable.LOGGER.warn("M4_SMOKE PASS: real Shift+C, candidates/pin, mixed MAX/slider/cost review, full/partial, GUI scales 1/2/3, zh/en, detail latency, menu/mode isolation, bulk64logs/MAX/drag/witness commit");
                 stage = -1;
                 restoreOptions();
                 mc.stop();
@@ -520,6 +581,19 @@ public final class M4ClientSmoke {
         if (overlay() == null || field(overlay(), "pending") != null || (boolean) field(overlay(), "dirty") || draft() == null) return false;
         var maximum = (CraftingService.Maximum) field(overlay(), "maximum");
         return maximum != null && !maximum.pending();
+    }
+    private static void cancelQueuedMaximum(Minecraft mc) throws Exception {
+        var create = (Button) field(overlay(), "create");
+        require(create.active, "Pending MAX disabled the real queued-action button");
+        queuedCancellationWitnesses = executionCounter("witnessValidations");
+        queuedCancellationFull = executionCounter("activeFullSearches");
+        queuedCancellationPartial = executionCounter("activePartialSearches");
+        click(create.getX() + 5, create.getY() + 5);
+        require(Boolean.TRUE.equals(field(overlay(), "queuedAction")), "MAX click was lost instead of queued once");
+        key(256, 0);
+        require(!CraftingPlanOverlay.active(), "Esc did not cancel waiting action");
+        queuedCancellationChecked = true;
+        CraftingPlanOverlay.open(mc.screen, PICK, false);
     }
     private static void click(double x, double y) {
         Screen parent = Minecraft.getInstance().screen;

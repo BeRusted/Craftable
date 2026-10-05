@@ -95,7 +95,10 @@ public final class M410SearchRegressionGameTests {
             var catalog = new CraftingRecipes(player, true);
             var clock = new AtomicLong();
             var allowance = SearchBudget.resumable(clock::getAndIncrement, 1_000_000, SearchBudget.MAX_STATES);
-            var sources = List.of(source(0, Items.STICK, 1), source(1, Items.COBBLESTONE, 1));
+            // Existing stock now defers producer alternatives until needed.
+            // Force actual production from the 17 ordinary candidates while
+            // keeping enough stone for the preferred stick AND string route.
+            var sources = List.of(source(0, Items.COBBLESTONE, 2));
             var search = new CraftSearch(catalog, request("m410_candidate_root", false), sources, allowance, p -> null);
             Optional<SearchResult> result = Optional.empty();
             boolean pausedAfterOmission = false;
