@@ -74,11 +74,11 @@ public final class CraftablePayloadHandlers {
             try (var lease = CraftableRequestLimiter.planning(server, id, false)) {
                 if (!lease.allowed()) continue;
                 var snapshot = org.berusted.craftable.execution.CraftingSessions.refreshBrowsing(player);
-                boolean changed = transfer.snapshot != snapshot;
+                boolean sendSnapshot = transfer.needsSnapshot(snapshot);
                 transfer.snapshot = snapshot;
                 transfer.nextScan = now + 8;
                 CraftingWire.SnapshotHeader header = null;
-                if (changed) {
+                if (sendSnapshot) {
                     transfer.bytes = CraftingWire.snapshot(snapshot, player.registryAccess());
                     transfer.retained = 2L * transfer.bytes.length + 256L * snapshot.inputs().size() + 36L * 1024;
                     if (BROWSERS.values().stream().mapToLong(v -> v.retained).sum() > 64L * 1024 * 1024)
@@ -137,6 +137,13 @@ public final class CraftablePayloadHandlers {
         int chunk;
         long heard, nextScan, retained;
         BrowseTransfer(CraftingDetailPayloads.BrowseRequest request) { this.request = request; }
+
+        boolean needsSnapshot(org.berusted.craftable.environment.BrowsingSnapshot current) {
+            // A failed receiver may lose unchanged values. Re-send them after
+            // the active stream ends, without restarting an in-flight transfer.
+            return snapshot != current || bytes == null
+                    && (!request.session().equals(current.session()) || request.resources() != current.resources());
+        }
     }
 
     public static void handlePlanPreview(CraftingDetailPayloads.PreviewRequest payload, net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.Context context) {

@@ -88,8 +88,7 @@ public final class ClientBrowsePlanner {
         }
         long now = mc.level.getGameTime();
         if (sentAt == Long.MIN_VALUE || now - sentAt >= 8 || now < sentAt) {
-            net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(new CraftingDetailPayloads.BrowseRequest(menuId, revision, true,
-                    snapshot == null ? CraftingDetailPayloads.NO_TOKEN : snapshot.session(), snapshot == null ? -1 : snapshot.resources()));
+            net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(browseRequest());
             sentAt = now;
         }
         if (receiver != null && receiver.expired(System.nanoTime())) {
@@ -130,6 +129,16 @@ public final class ClientBrowsePlanner {
         // caps cached projections/queue scans on unusually fast machines.
         for (int dispatched = 0; dispatched < 64 && System.nanoTime() - sliceStart < 2_000_000L; dispatched++)
             if (!dispatch(sliceStart)) break;
+    }
+
+    static CraftingDetailPayloads.BrowseRequest browseRequest() {
+        // Acknowledge transport progress while receiving/decoding. These values
+        // do not authorize browsing; a failed receiver advertises missing data.
+        boolean pending = receiving != null && (decoder != null
+                || receiver != null && !receiver.expired(System.nanoTime()));
+        return new CraftingDetailPayloads.BrowseRequest(menuId, revision, true,
+                pending ? receiving.session() : snapshot == null ? CraftingDetailPayloads.NO_TOKEN : snapshot.session(),
+                pending ? receiving.resources() : snapshot == null ? -1 : snapshot.resources());
     }
 
     static void advanceDecoding(long sliceStart) {
@@ -516,7 +525,8 @@ public final class ClientBrowsePlanner {
             if (!snapshot.session().equals(value.session())) ClientRecipeStatusStore.beginLocal();
             snapshot = null; input = null; resetCalculations();
         }
-        if (value.header() != null) {
+        // A delayed retransmission cannot reset an already decoded value scope.
+        if (value.header() != null && snapshot == null) {
             if (receiver != null) receiver.close();
             if (decoder != null) decoder.close(); decoder = null;
             receiving = value.header(); receiver = new CraftingWire.SnapshotReceiver(receiving, System.nanoTime());
