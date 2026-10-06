@@ -1,0 +1,188 @@
+package org.berusted.craftable.recipe;
+
+import java.util.List;
+import java.util.Set;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
+import org.berusted.craftable.api.CraftingResultCode;
+import org.berusted.craftable.planner.CraftPlan;
+
+/** Value-oriented access to one generation's ordinary recipe knowledge. Search
+ * operations do not read players, Level, containers or crafting hooks.
+ * The owning game thread may populate the index's bounded static relation cache;
+ * this is not a promise of arbitrary concurrent access. */
+public final class PlanningInput {
+    private final CraftingRecipes.Index index;
+    private final boolean workbench, limited;
+    private final Set<ResourceLocation> unlocked;
+
+    PlanningInput(CraftingRecipes.Index index, boolean workbench, boolean limited, Set<ResourceLocation> unlocked) {
+        this.index = index;
+        this.workbench = workbench;
+        this.limited = limited;
+        this.unlocked = Set.copyOf(unlocked);
+    }
+
+    /** Connection-scoped static knowledge, independent of open menus and
+     * dynamic inventory versions. The client controller owns one instance;
+     * calling bind is not a grant to execute or expose local verdicts. */
+    public static final class Catalog {
+        public enum State { EMPTY, BUILDING, READY, LIMITED }
+        private Object connection, generation;
+        private CraftingRecipes.Index.Builder building;
+        private CraftingRecipes.Index index;
+        private State state = State.EMPTY;
+        private int builds;
+
+        public void observe(Object connection, Object generation,
+                java.util.Collection<net.minecraft.world.item.crafting.RecipeHolder<?>> recipes,
+                net.minecraft.core.HolderLookup.Provider registries) {
+            java.util.Objects.requireNonNull(connection);
+            java.util.Objects.requireNonNull(generation);
+            if (this.connection == connection && this.generation == generation) return;
+            clear();
+            this.connection = connection;
+            this.generation = generation;
+            // The original synchronized collection is stable within a recipe
+            // generation. Reload/tag rebinding MUST supply a new generation.
+            if (recipes.size() > 65_536) { state = State.LIMITED; return; }
+            building = new CraftingRecipes.Index.Builder(generation, recipes, registries);
+            builds++;
+            state = State.BUILDING;
+        }
+
+        public void advance(long nanos) { advance(nanos, System::nanoTime); }
+
+        // A deterministic clock verifies progress without wall-clock assertions.
+        void advance(long nanos, java.util.function.LongSupplier clock) {
+            if (state != State.BUILDING) return;
+            try {
+                if (!building.advance(nanos, clock)) return;
+                index = building.result();
+                building = null;
+                state = State.READY;
+            } catch (RuntimeException exception) {
+                // Limits/unsupported normalization are unknown, never a
+                // partially published catalog that could prove recipes absent.
+                building.cancel();
+                building = null;
+                state = State.LIMITED;
+                org.berusted.craftable.Craftable.LOGGER.warn("Local recipe catalog unavailable ({})",
+                        exception.getClass().getSimpleName());
+            }
+        }
+
+        public PlanningInput bind(boolean workbench, boolean limited, Set<ResourceLocation> unlocked) {
+            if (state != State.READY) throw new IllegalStateException("Catalog is not ready");
+            return new PlanningInput(index, workbench, limited, unlocked);
+        }
+
+        public State state() { return state; }
+        public int builds() { return builds; }
+        int processed() { return building == null ? 0 : building.processed(); }
+
+        public void clear() {
+            if (building != null) building.cancel();
+            building = null;
+            index = null;
+            connection = generation = null;
+            state = State.EMPTY;
+        }
+    }
+
+    public CraftingRecipes.Entry find(ResourceLocation id) { return index.byId.get(id); }
+    public List<CraftingRecipes.Entry> entries() { return index.valueOrdered; }
+    public List<CraftingRecipes.Entry> producing(Ingredient ingredient) {
+        return index.producing(ingredient).stream().filter(e -> index.valueRecipes.contains(e.id())).toList();
+    }
+    public boolean hasUnsupportedProducer(Ingredient ingredient) {
+        return index.producing(ingredient).stream().anyMatch(e -> !index.valueRecipes.contains(e.id()));
+    }
+    public Object generation() { return index; }
+    public String fingerprint() { return index.planningFingerprint; }
+    public boolean fullySupported() { return index.valueRecipes.size() == index.ordered.size(); }
+    public boolean workbench() { return workbench; }
+
+    /** Conservative scheduling hint only. A bucket returned by another input
+     * must not be moved before the operation that can return it. Unknown
+     * behavior disables the hint rather than becoming an absence proof. */
+    public boolean mayReturn(Ingredient ingredient) {
+        if (!fullySupported()) return true;
+        for (var option : ingredient.getItems()) if (index.returnedItems.contains(option.getItem())) return true;
+        return false;
+    }
+
+    /** Presence-only relaxation over the frozen ordinary model. Include
+     * returned containers as well as the main output; neither implies that
+     * enough material exists or that this recipe may execute. */
+    public boolean addReachableOutputs(CraftingRecipes.Entry entry, Set<net.minecraft.world.item.Item> reachable) {
+        if (reachable.contains(entry.output().getItem()) && !index.returningRecipes.contains(entry.id())) return false;
+        for (var requirement : entry.requirements()) {
+            boolean any = false;
+            for (var option : requirement.ingredient().getItems()) {
+                if (reachable.contains(option.getItem())) { any = true; break; }
+            }
+            if (!any) return false;
+        }
+        boolean changed = reachable.add(entry.output().getItem());
+        for (var requirement : entry.requirements()) for (var option : requirement.ingredient().getItems()) {
+            if (!reachable.contains(option.getItem())) continue;
+            var remainder = index.remainders.get(option.getItem());
+            if (remainder != null && !remainder.isEmpty()) changed |= reachable.add(remainder.getItem());
+        }
+        return changed;
+    }
+
+    /** A nested exact inverse cannot supply a deficit: it first needs the very
+     * material its parent would produce. Existing stock is consumed directly
+     * by search instead. Only normalize fixed, component-free, remainder-free
+     * ordinary conversions; lossy/gaining or alternative-input recipes are NOT
+     * equivalent and must keep their normal bounded search semantics. */
+    public boolean isExactInverse(CraftingRecipes.Entry first, CraftingRecipes.Entry second) {
+        return first != null && second != null
+                && index.valueRecipes.contains(first.id()) && index.valueRecipes.contains(second.id())
+                && homogeneousInputs(first, second.output()) && homogeneousInputs(second, first.output());
+    }
+
+    private boolean homogeneousInputs(CraftingRecipes.Entry recipe, ItemStack oppositeOutput) {
+        var remainder = index.remainders.get(oppositeOutput.getItem());
+        if (!oppositeOutput.getComponentsPatch().isEmpty() || remainder == null || !remainder.isEmpty()
+                || recipe.requirements().size() != oppositeOutput.getCount()) return false;
+        for (var requirement : recipe.requirements()) {
+            var options = requirement.ingredient().getItems();
+            if (options.length != 1 || !ItemStack.isSameItemSameComponents(options[0], oppositeOutput)) return false;
+        }
+        return true;
+    }
+
+    public CraftingResultCode unavailable(CraftingRecipes.Entry entry) {
+        if (entry == null || !index.valueRecipes.contains(entry.id())) return CraftingResultCode.UNSUPPORTED_RECIPE;
+        if (limited && !unlocked.contains(entry.id())) return CraftingResultCode.RECIPE_LOCKED;
+        if (entry.gridSize() == 3 && !workbench) return CraftingResultCode.MISSING_WORKSTATION;
+        return null;
+    }
+
+    public CraftPlan.Step assemble(CraftingRecipes.Entry entry, String path, List<ItemStack> grid) {
+        if (unavailable(entry) != null || grid.size() != entry.gridSize() * entry.gridSize()) return null;
+        // Search always binds a recipe's canonical grid. Mirrored/player grids
+        // are a server matching concern, not a second local recipe matcher.
+        var required = new boolean[grid.size()];
+        for (var demand : entry.requirements()) {
+            var stack = grid.get(demand.slot());
+            if (stack.getCount() != 1 || CraftingRecipes.protectedStack(stack) || !demand.ingredient().test(stack)) return null;
+            required[demand.slot()] = true;
+        }
+        var remainders = new java.util.ArrayList<ItemStack>();
+        for (int slot = 0; slot < grid.size(); slot++) {
+            var stack = grid.get(slot);
+            if (!required[slot] && !stack.isEmpty()) return null;
+            if (!stack.isEmpty()) {
+                var remainder = index.remainders.get(stack.getItem());
+                if (remainder == null) return null; // Unknown behavior is not an empty remainder.
+                if (!remainder.isEmpty()) remainders.add(remainder.copy());
+            }
+        }
+        return new CraftPlan.Step(entry.holder(), path, entry.gridSize(), grid, entry.output(), remainders);
+    }
+}

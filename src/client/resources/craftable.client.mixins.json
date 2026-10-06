@@ -8,7 +8,11 @@
     "RecipeBookComponentMixin",
     "RecipeBookPageAccessor",
     "RecipeButtonMixin",
-    "RecipeCollectionMixin"
+    "RecipeCollectionMixin",
+    "MinecraftMixin",
+    "KeyboardHandlerMixin",
+    "ContainerScreenMixin",
+    "ClientPacketListenerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

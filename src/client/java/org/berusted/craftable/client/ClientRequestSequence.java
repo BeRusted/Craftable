@@ -2,7 +2,7 @@ package org.berusted.craftable.client;
 
 import java.util.concurrent.atomic.AtomicLong;
 
-
+/** Correlates asynchronous client responses; it carries no server authority. */
 public final class ClientRequestSequence {
     private static final AtomicLong NEXT = new AtomicLong();
 

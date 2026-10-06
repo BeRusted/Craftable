@@ -6,10 +6,11 @@ import net.minecraft.client.KeyMapping;
 import org.lwjgl.glfw.GLFW;
 
 public final class CraftableKeyMappings {
-    public static final String CATEGORY = "key.categories.craftable";
+    public static final String CATEGORY = "config.key.title";
 
     public static final KeyMapping CREATE_ONE = KeyBindingHelper.registerKeyBinding(
             new KeyMapping(
+                    // Vanilla persists bindings by this name; keep it stable across upgrades.
                     "key.craftable.create_one",
                     InputConstants.Type.KEYSYM,
                     GLFW.GLFW_KEY_C,
@@ -17,17 +18,8 @@ public final class CraftableKeyMappings {
             )
     );
 
-    public static final KeyMapping UNDO_LAST = KeyBindingHelper.registerKeyBinding(
-            new KeyMapping(
-                    "key.craftable.undo_last",
-                    InputConstants.Type.KEYSYM,
-                    GLFW.GLFW_KEY_Z,
-                    CATEGORY
-            )
-    );
-
     public static void register() {
-        if (CREATE_ONE == null || UNDO_LAST == null) {
+        if (CREATE_ONE == null) {
             throw new IllegalStateException("Craftable 按键注册失败");
         }
     }

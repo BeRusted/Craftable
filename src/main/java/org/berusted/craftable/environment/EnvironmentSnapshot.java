@@ -1,17 +1,21 @@
 package org.berusted.craftable.environment;
 
-import net.minecraft.core.BlockPos;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.world.level.Level;
-import org.berusted.craftable.config.EnvironmentScanSettings;
-import org.berusted.craftable.workstation.WorkstationCapability;
-import org.berusted.craftable.workstation.WorkstationEndpoint;
-
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
+import org.berusted.craftable.client.config.EnvironmentScanSettings;
+import org.berusted.craftable.workstation.WorkstationCapability;
+import org.berusted.craftable.workstation.WorkstationEndpoint;
 
+/**
+ * A server-authoritative, single-scan view of one player's work environment.
+ * Container endpoints are live handles, so snapshots are main-thread-only and
+ * must never be persisted or sent to a client.
+ */
 public record EnvironmentSnapshot(
         ResourceKey<Level> dimension,
         BlockPos origin,
@@ -32,6 +36,14 @@ public record EnvironmentSnapshot(
         requireUniqueIds(workstations.stream().map(WorkstationEndpoint::id).toList(), "workstation endpoint");
     }
 
+    public Optional<ContainerEndpoint> endpoint(String id) {
+        return endpoints.stream().filter(endpoint -> endpoint.id().equals(id)).findFirst();
+    }
+
+    public boolean supports(WorkstationCapability capability) {
+        return workstations.stream().anyMatch(endpoint -> endpoint.capability() == capability);
+    }
+
     private static void requireUniqueIds(List<String> ids, String label) {
         HashSet<String> unique = new HashSet<>();
         for (String id : ids) {
@@ -39,13 +51,5 @@ public record EnvironmentSnapshot(
                 throw new IllegalArgumentException("Duplicate " + label + " id: " + id);
             }
         }
-    }
-
-    public Optional<ContainerEndpoint> endpoint(String id) {
-        return endpoints.stream().filter(endpoint -> endpoint.id().equals(id)).findFirst();
-    }
-
-    public boolean supports(WorkstationCapability capability) {
-        return workstations.stream().anyMatch(endpoint -> endpoint.capability() == capability);
     }
 }
