@@ -1,7 +1,11 @@
 package org.berusted.craftable.execution;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import org.berusted.craftable.planner.CraftPlan;
 import org.berusted.craftable.planner.CraftRequest;
@@ -20,6 +24,7 @@ final class CraftWitnessValidator {
         var ledger = new ResourceLedger(sources);
         var supported = recipes.planningInput();
         var steps = new ArrayList<CraftPlan.Step>();
+        var recipesByPath = new HashMap<String, Map<ResourceLocation, CraftingRecipes.Entry>>();
         int[] usedOutputs = new int[witness.steps().size()];
         boolean[] contributes = new boolean[usedOutputs.length];
         boolean[] anchored = new boolean[usedOutputs.length];
@@ -68,6 +73,7 @@ final class CraftWitnessValidator {
             int index = steps.size();
             steps.add(new CraftPlan.Step(actual.recipe(), actual.path(), actual.gridSize(), grid,
                     actual.output(), actual.remainders(), claimed.origins()));
+            recipesByPath.computeIfAbsent(claimed.path(), ignored -> new HashMap<>()).putIfAbsent(entry.id(), entry);
             ledger.produce(actual.output(), root, false, actual.path(), index);
             for (var remainder : actual.remainders()) ledger.produce(remainder, false, true, actual.path(), index);
             contributes[index] = root;
@@ -83,26 +89,25 @@ final class CraftWitnessValidator {
         // Batch rounding is allowed; a whole removable batch of identical
         // intermediate output is not. This is bounded accounting, not a second
         // optimizer or a search for a cheaper alternative recipe.
-        var outputs = steps.stream().map(CraftPlan.Step::output).toList();
-        for (int i = 0; i < steps.size(); i++) {
-            var step = steps.get(i);
-            int spare = 0, smallest = Integer.MAX_VALUE;
-            for (int j = 0; j < steps.size(); j++) {
-                var other = steps.get(j);
-                if (other.path().startsWith(step.path() + ".")) {
-                    require(!step.recipe().id().equals(other.recipe().id()));
-                    // Match search's adjacent-inverse normalization, including
-                    // a no-op hidden inside an otherwise productive chain.
-                    if (other.path().lastIndexOf('.') == step.path().length())
-                        require(!supported.isExactInverse(recipes.find(step.recipe().id()), recipes.find(other.recipe().id())));
+        // Paths may contain several batches and several selected recipes. A
+        // single entry per path would silently erase a forbidden ancestor.
+        for (var path : recipesByPath.entrySet()) {
+            int separator = path.getKey().lastIndexOf('.');
+            boolean direct = true;
+            while (separator >= 0) {
+                require(budget.alive());
+                String ancestorPath = path.getKey().substring(0, separator);
+                var ancestors = recipesByPath.get(ancestorPath);
+                if (ancestors != null) for (var descendant : path.getValue().values()) {
+                    require(!ancestors.containsKey(descendant.id()));
+                    if (direct) for (var ancestor : ancestors.values())
+                        require(!supported.isExactInverse(ancestor, descendant) && budget.alive());
                 }
-                if (!other.path().equals("0") && ItemStack.isSameItemSameComponents(outputs.get(i), outputs.get(j))) {
-                    spare = Math.addExact(spare, outputs.get(j).getCount() - usedOutputs[j]);
-                    smallest = Math.min(smallest, outputs.get(j).getCount());
-                }
+                separator = ancestorPath.lastIndexOf('.');
+                direct = false;
             }
-            require((step.path().equals("0") || spare < smallest) && budget.alive());
         }
+        validateIntermediateOutputs(steps, usedOutputs, budget);
         var plan = new CraftPlan(request.recipe(), request.batches(), roots, steps, ledger.extractions(),
                 ledger.delivery(true), ledger.delivery(false), List.of(),
                 steps.stream().allMatch(step -> recipes.find(step.recipe().id()).safePreparation()));
@@ -110,7 +115,36 @@ final class CraftWitnessValidator {
         return plan;
     }
 
+    /** Final accounting only; the entry above still validates every source,
+     * recipe, provenance edge and ancestor before applying this condition. */
+    private static void validateIntermediateOutputs(List<CraftPlan.Step> steps, int[] usedOutputs, SearchBudget budget) {
+        var groupsByItem = new HashMap<Item, List<OutputGroup>>();
+        for (int i = 0; i < steps.size(); i++) {
+            var step = steps.get(i);
+            require(budget.alive());
+            if (step.path().equals("0")) continue;
+            var output = step.output();
+            var groups = groupsByItem.computeIfAbsent(output.getItem(), ignored -> new ArrayList<>());
+            OutputGroup group = null;
+            for (var candidate : groups) {
+                require(budget.alive());
+                if (ItemStack.isSameItemSameComponents(candidate.output, output)) { group = candidate; break; }
+            }
+            if (group == null) { group = new OutputGroup(output); groups.add(group); }
+            group.spare = Math.addExact(group.spare, output.getCount() - usedOutputs[i]);
+            group.minimum = Math.min(group.minimum, output.getCount());
+        }
+        for (var groups : groupsByItem.values()) for (var group : groups)
+            require(group.spare < group.minimum && budget.alive());
+    }
+
     private static void require(boolean valid) {
         if (!valid) throw new IllegalArgumentException("Invalid or expired crafting witness");
+    }
+
+    private static final class OutputGroup {
+        final ItemStack output;
+        int spare, minimum = Integer.MAX_VALUE;
+        OutputGroup(ItemStack output) { this.output = output; }
     }
 }

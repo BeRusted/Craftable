@@ -45,7 +45,7 @@ public final class ResourceLedger {
         // Reuse intermediate batch surplus before manufacturing/consuming more.
         for (int i = 0; i < generated.size(); i++) {
             Lot lot = generated.get(i);
-            if (!lot.terminal && !CraftingRecipes.protectedStack(lot.stack) && lot.available > 0 && ingredient.test(lot.stack) && seen.add(Key.of(lot.stack))) {
+            if (lot.available > 0 && !lot.terminal && !CraftingRecipes.protectedStack(lot.stack) && ingredient.test(lot.stack) && seen.add(Key.of(lot.stack))) {
                 result.add(new Taken(-1, i, lot.stack.copyWithCount(1)));
                 if (singleDefaultItem) return result;
             }
@@ -61,11 +61,20 @@ public final class ResourceLedger {
     }
 
     boolean has(Ingredient ingredient) {
-        for (Lot lot : generated) if (!lot.terminal && !CraftingRecipes.protectedStack(lot.stack) && lot.available > 0 && ingredient.test(lot.stack)) return true;
+        for (Lot lot : generated) if (lot.available > 0 && !lot.terminal && !CraftingRecipes.protectedStack(lot.stack) && ingredient.test(lot.stack)) return true;
         for (int i = 0; i < available.length; i++) {
             if (available[i] > 0 && ingredient.test(sources.get(i).stack)) return true;
         }
         return false;
+    }
+
+    /** Current usable count; the root step floor calls this only on the
+     * initial ledger, before any grid reservations or generated production. */
+    long quantity(Ingredient ingredient) {
+        long count = 0;
+        for (int i = 0; i < available.length; i++)
+            if (available[i] > 0 && ingredient.test(sources.get(i).stack)) count += available[i];
+        return count;
     }
 
     boolean hasProtected(Ingredient ingredient) {
@@ -196,6 +205,27 @@ public final class ResourceLedger {
             }
         }
         throw new IllegalArgumentException("Unfunded ingredient");
+    }
+
+    /** MAX certificate only: no generated stock, reservations or mutations.
+     * Source fingerprints and usable counts belong to this initial ledger;
+     * callers do not get access to a mutable inventory or live container. */
+    java.util.OptionalLong initialPotential(java.util.Map<Item, Integer> weights,
+            java.util.Set<Item> reachable, SearchBudget budget) {
+        if (!generated.isEmpty() || sources.size() > 16_384) return java.util.OptionalLong.empty();
+        long result = 0;
+        for (int i = 0; i < sources.size(); i++) {
+            if (!budget.alive()) return java.util.OptionalLong.empty();
+            var stack = sources.get(i).stack;
+            int usable = CraftingRecipes.protectedStack(stack) ? 0 : stack.getCount();
+            if (consumed[i] != 0 || available[i] != usable) return java.util.OptionalLong.empty();
+            if (usable == 0) continue;
+            if (!reachable.contains(stack.getItem())) return java.util.OptionalLong.empty();
+            int weight = weights.getOrDefault(stack.getItem(), 0);
+            if (weight < 0 || weight > 64) return java.util.OptionalLong.empty();
+            result += (long) usable * weight;
+        }
+        return budget.alive() ? java.util.OptionalLong.of(result) : java.util.OptionalLong.empty();
     }
 
     public record Binding(String reference, boolean remainder) {}

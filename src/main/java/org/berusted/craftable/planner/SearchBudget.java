@@ -15,6 +15,7 @@ public final class SearchBudget {
     private final int maximumStates;
     private int states;
     private boolean truncated;
+    private boolean exhausted;
     private boolean resumable;
     private long remaining;
     private long started;
@@ -34,7 +35,7 @@ public final class SearchBudget {
 
     public boolean enter() {
         if (!alive() || ++states > maximumStates) {
-            truncated = true;
+            truncated = exhausted = true;
             return false;
         }
         return true;
@@ -43,12 +44,15 @@ public final class SearchBudget {
     public boolean alive() {
         boolean alive = (resumable ? remaining > (active ? clock.getAsLong() - started : 0)
                 : clock.getAsLong() < deadline) && states < maximumStates;
-        if (!alive) truncated = true;
+        if (!alive) truncated = exhausted = true;
         return alive;
     }
 
     public void truncate() { truncated = true; }
     public boolean truncated() { return truncated; }
+    /** A dropped branch makes a negative proof incomplete, but does not spend
+     * the remaining allowance or invalidate a retained positive route. */
+    public boolean exhausted() { return exhausted; }
     public int states() { return states; }
 
     /** CPU allowance survives pauses; waiting between ticks spends no CPU and
@@ -79,5 +83,8 @@ public final class SearchBudget {
     // Only check a slice boundary BEFORE removing a task/closure entry. Calls
     // inside one state use alive(), so a pause cannot discard a half-bound grid.
     boolean canContinue() { return alive() && clock.getAsLong() < sliceDeadline; }
-    public long remainingNanos() { return resumable ? remaining : Math.max(0, deadline - clock.getAsLong()); }
+    public long remainingNanos() {
+        return resumable ? Math.max(0, remaining - (active ? Math.max(0, clock.getAsLong() - started) : 0))
+                : Math.max(0, deadline - clock.getAsLong());
+    }
 }

@@ -99,9 +99,24 @@ public final class ClientRecipeStatusStore {
         var entry = STATUSES.get(request.withPartial(false));
         return entry == null ? null : entry.code();
     }
+    /** Full-only conclusions drive filtering and MAX. A bounded diagnostic
+     * is separate completed work, not a revision of that conclusion. */
+    public static CraftingResultCode fullReason(CraftRequest request) { return reason(request); }
+    public static CraftingResultCode diagnosticReason(CraftRequest request) {
+        var entry = STATUSES.get(request.withPartial(false));
+        return entry == null ? null : entry.diagnosticCode();
+    }
+    public static boolean diagnosed(CraftRequest request) {
+        var entry = STATUSES.get(request.withPartial(false));
+        return entry != null && entry.diagnosed();
+    }
+    public static boolean diagnosticExhausted(CraftRequest request) {
+        var code = diagnosticReason(request);
+        return code == CraftingResultCode.SEARCH_BUDGET_EXCEEDED || code == CraftingResultCode.UNSUPPORTED_RECIPE;
+    }
     public static boolean needsDiagnostic(ResourceLocation id) {
         var entry = STATUSES.get(key(id));
-        return entry != null && !entry.diagnosed() && entry.evidence() != null;
+        return entry != null && !entry.diagnosed() && entry.evidence() != null && entry.status() != CraftingStatus.CRAFTABLE;
     }
     public static CraftSearch.FullEvidence evidence(ResourceLocation id) {
         return evidence(key(id));
@@ -124,16 +139,41 @@ public final class ClientRecipeStatusStore {
         if (!local || !canRecord(request)) return;
         // Plans/frontiers are never retained in the catalog-wide result store.
         // A bounded/unknown conclusion is still completed work, not a retry cue.
-        var next = new StatusEntry(status, code, evidence, diagnosed);
+        var previous = STATUSES.get(request);
+        StatusEntry next;
+        if (diagnosed) {
+            // A diagnostic may also have completed its full phase before
+            // entering preparation. Preserve the proof even when that later
+            // phase is bounded, and never downgrade an existing full success.
+            var fullStatus = previous == null ? (status == CraftingStatus.PARTIAL ? CraftingStatus.BLOCKED : status) : previous.status();
+            var fullCode = previous == null ? (status == CraftingStatus.PARTIAL ? CraftingResultCode.SEARCH_BUDGET_EXCEEDED : code) : previous.code();
+            var fullEvidence = previous == null ? evidence : previous.evidence();
+            if (fullStatus != CraftingStatus.CRAFTABLE && fullCode != CraftingResultCode.CREATED) {
+                if (code == CraftingResultCode.CREATED) {
+                    fullStatus = CraftingStatus.CRAFTABLE; fullCode = code; fullEvidence = null;
+                } else if (evidence != null) {
+                    fullStatus = CraftingStatus.BLOCKED; fullCode = CraftingResultCode.MISSING_INGREDIENTS; fullEvidence = evidence;
+                }
+            }
+            next = new StatusEntry(fullStatus, fullCode, fullEvidence, status, code, true);
+        } else {
+            next = new StatusEntry(status, code, evidence, null, null, false);
+        }
         if (!STATUSES.containsKey(request)) retainedBytes += weight(request);
         if (!next.equals(STATUSES.put(request, next))) revision++;
         if (request.equals(key(request.recipe()))) {
             if (!DISPLAY.containsKey(request.recipe())) displayBytes += displayWeight(request.recipe());
-            var display = new DisplayEntry(status, code);
+            // Preparation is useful presentation, not proof of a complete
+            // craft. NEVER permits reading it in details, not a partial action.
+            boolean preparation = next.status() != CraftingStatus.CRAFTABLE && next.code() != CraftingResultCode.CREATED
+                    && next.diagnosticStatus() == CraftingStatus.PARTIAL && request.policy() != CraftRequest.PartialPolicy.NEVER;
+            var display = new DisplayEntry(preparation ? CraftingStatus.PARTIAL : next.status(),
+                    preparation ? next.diagnosticCode() : next.code());
             if (!display.equals(DISPLAY.put(request.recipe(), display))) presentationRevision++;
         }
     }
     private record DisplayEntry(CraftingStatus status, CraftingResultCode code) {}
     private record StatusEntry(CraftingStatus status, CraftingResultCode code,
-            CraftSearch.FullEvidence evidence, boolean diagnosed) {}
+            CraftSearch.FullEvidence evidence, CraftingStatus diagnosticStatus,
+            CraftingResultCode diagnosticCode, boolean diagnosed) {}
 }

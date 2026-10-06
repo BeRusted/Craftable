@@ -3,6 +3,7 @@ package org.berusted.craftable.client.network;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.LongSupplier;
 
 /** Main-thread packet rate limits protecting the bounded but non-trivial world scan. */
 final class CraftableRequestLimiter {
@@ -16,7 +17,11 @@ final class CraftableRequestLimiter {
     // Reserve the rest for explicit C/confirm requests, without a work queue.
     static Lease planning(net.minecraft.server.MinecraftServer server, UUID player, boolean active) {
         Frame frame = FRAMES.computeIfAbsent(server, ignored -> new Frame());
-        long tick = server.getTickCount();
+        return planning(frame, server.getTickCount(), player, active);
+    }
+
+    /** Same admission policy with an explicit frame/clock for deterministic checks. */
+    static Lease planning(Frame frame, long tick, UUID player, boolean active) {
         if (frame.tick != tick) { frame.tick = tick; frame.total = frame.background = 0; }
         long remaining = Math.min(8_000_000L, Math.max(0, 16_000_000L - frame.total));
         if (!active) remaining = Math.min(remaining, Math.max(0, 8_000_000L - frame.background));
@@ -42,23 +47,32 @@ final class CraftableRequestLimiter {
         private static final class Turn { long seen; long granted = Long.MIN_VALUE; }
     }
 
-    private static final class Frame {
+    static final class Frame {
+        final LongSupplier clock;
         long tick = Long.MIN_VALUE;
         long total;
         long background;
         final BackgroundTurns turns = new BackgroundTurns();
+        Frame() { this(System::nanoTime); }
+        Frame(LongSupplier clock) { this.clock = clock; }
     }
 
     static final class Lease implements AutoCloseable {
         final Frame frame;
         final boolean active;
-        final long start = System.nanoTime();
+        final long start;
         final long allowance;
-        Lease(Frame frame, boolean active, long allowance) { this.frame = frame; this.active = active; this.allowance = allowance; }
-        long remaining() { return Math.max(0, allowance - (System.nanoTime() - start)); }
+        private boolean closed;
+        Lease(Frame frame, boolean active, long allowance) {
+            this.frame = frame; this.active = active; this.allowance = allowance;
+            start = frame.clock.getAsLong();
+        }
+        long remaining() { return closed ? 0 : Math.max(0, allowance - Math.max(0, frame.clock.getAsLong() - start)); }
         boolean allowed() { return allowance > 0; }
         @Override public void close() {
-            long elapsed = System.nanoTime() - start;
+            if (closed) return;
+            closed = true;
+            long elapsed = Math.max(0, frame.clock.getAsLong() - start);
             frame.total += elapsed;
             if (!active) frame.background += elapsed;
         }

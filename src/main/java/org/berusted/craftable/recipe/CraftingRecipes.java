@@ -116,6 +116,12 @@ public final class CraftingRecipes {
     }
 
     public Object generation() { return index; }
+
+    /** Reject a stale review before rebuilding or searching a new generation. */
+    public static boolean isCurrentGeneration(MinecraftServer server, Object generation) {
+        var current = INDEXES.get(server);
+        return current == generation && current != null && current.identity == server.getRecipeManager().getRecipes();
+    }
     public Object accessIdentity() { return List.of(index, workbench, limited, Set.copyOf(unlocked)); }
     public boolean workbench() { return workbench; }
     public boolean limitedCrafting() { return limited; }
@@ -247,6 +253,8 @@ public final class CraftingRecipes {
         final Map<Ingredient, List<Entry>> aliases = new IdentityHashMap<>();
         final Set<ResourceLocation> valueRecipes = new java.util.HashSet<>();
         final Map<Item, ItemStack> remainders = new HashMap<>();
+        final Set<Item> returnedItems = new java.util.HashSet<>();
+        final Set<ResourceLocation> returningRecipes = new java.util.HashSet<>();
         int optionReferences, producerReferences;
         long lookups, hits, builds;
         long estimatedBytes;
@@ -282,6 +290,7 @@ public final class CraftingRecipes {
             int size = recipe.canCraftInDimensions(2, 2) ? 2 : 3;
             if (!recipe.canCraftInDimensions(size, size)) return;
             var requirements = new ArrayList<Requirement>();
+            boolean returnsContainer = false;
             boolean valueRecipe = recipe.getClass() == ShapedRecipe.class
                     || recipe.getClass() == net.minecraft.world.item.crafting.ShapelessRecipe.class;
             for (int i = 0; i < recipe.getIngredients().size(); i++) {
@@ -298,7 +307,13 @@ public final class CraftingRecipes {
                     var options = java.util.Arrays.stream(ingredient.getItems()).map(ItemStack::copy).toArray(ItemStack[]::new);
                     for (var option : options) {
                         if (!BuiltInRegistries.ITEM.getKey(option.getItem()).getNamespace().equals("minecraft")) valueRecipe = false;
-                        else remainders.computeIfAbsent(option.getItem(), item -> item.hasCraftingRemainingItem() ? new ItemStack(item.getCraftingRemainingItem()) : ItemStack.EMPTY);
+                        else {
+                            var remainder = remainders.computeIfAbsent(option.getItem(), item -> item.hasCraftingRemainingItem() ? new ItemStack(item.getCraftingRemainingItem()) : ItemStack.EMPTY);
+                            if (!remainder.isEmpty()) {
+                                returnedItems.add(remainder.getItem());
+                                returnsContainer = true;
+                            }
+                        }
                     }
                     ingredient = Ingredient.of(options);
                 }
@@ -312,6 +327,7 @@ public final class CraftingRecipes {
             var entry = new Entry((RecipeHolder<CraftingRecipe>) (RecipeHolder<?>) holder,
                     size, requirements, output, safe);
             byId.put(holder.id(), entry);
+            if (returnsContainer) returningRecipes.add(holder.id());
             if (valueRecipe) valueRecipes.add(holder.id());
             byOutput.computeIfAbsent(output.getItem(), ignored -> new ArrayList<>()).add(entry);
         }

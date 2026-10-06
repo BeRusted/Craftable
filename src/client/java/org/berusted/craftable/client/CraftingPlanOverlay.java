@@ -47,6 +47,11 @@ public final class CraftingPlanOverlay extends Screen {
     private boolean localDraft;
     private Object reviewedIdentity;
     private org.berusted.craftable.planner.CraftPlan.Witness submittedWitness;
+    // One bounded replay description belongs to the displayed review. Passive
+    // MAX can replace its sole reusable plan without erasing this description.
+    private org.berusted.craftable.planner.CraftPlan.Witness displayedWitness;
+    private CraftRequest displayedWitnessRequest;
+    private long displayedWitnessScope = -1;
     private long resourceScope = -1;
     private long unavailableSince;
     private boolean fallbackUsed;
@@ -63,6 +68,7 @@ public final class CraftingPlanOverlay extends Screen {
     private Button create;
     private RefreshButton refresh;
     private PlanView displayedView;
+    private Map<String, Object> displayedAlternativeGroups = Map.of();
     private final List<Component> rows = new ArrayList<>();
     private final List<net.minecraft.util.FormattedCharSequence> wrappedRows = new ArrayList<>();
     private Component notice = Component.empty();
@@ -109,7 +115,7 @@ public final class CraftingPlanOverlay extends Screen {
         int available = Math.max(180, width - 28);
         int sliderWidth = available * 65 / 100;
         graph = addRenderableWidget(new PlanGraphWidget(14, 14, available, Math.max(30, height - 76), this::choose));
-        if (displayedView != null) graph.show(displayedView);
+        if (displayedView != null) graph.show(displayedView, displayedAlternativeGroups);
         graph.visible = pane == Pane.GRAPH;
         slider = addRenderableWidget(new CountSlider(14, height - 34, sliderWidth));
         create = button(18 + sliderWidth, height - 34, available - sliderWidth - 4, text("create"), this::act);
@@ -150,29 +156,61 @@ public final class CraftingPlanOverlay extends Screen {
     }
 
     private Component candidateLabel(PlanView.Candidate candidate) {
-        var state = candidateStates.get(candidate.recipe());
-        String marker = state == null || state == CraftingResultCode.SEARCH_BUDGET_EXCEEDED ? "? "
-                : state == CraftingResultCode.CREATED ? "+ " : state == CraftingResultCode.PARTIAL_CREATED ? "! " : "× ";
-        return Component.literal(marker).append(candidate.output().getHoverName()).append(" ×" + candidate.output().getCount())
-                .append(" [" + candidate.recipe().getPath() + "]");
+        return candidate.output().getHoverName().copy().append(" ×" + candidate.output().getCount());
     }
 
-    private Component candidateDescription(PlanView.Candidate candidate) {
-        var description = Component.literal(candidate.recipe().toString()).append("\n")
-                .append(text("candidate_grid", candidate.gridSize(), candidate.gridSize()));
+    private List<Component> candidateTooltip(PlanView.Candidate candidate) {
+        // GuiGraphics accepts tooltip rows, not a multiline document. In-band
+        // LF can reach the glyph renderer without wrapping on short tooltips.
+        var lines = new ArrayList<Component>();
+        lines.add(candidateLabel(candidate));
+        lines.add(text("candidate_grid", candidate.gridSize(), candidate.gridSize()));
         minecraft.level.getRecipeManager().byKey(candidate.recipe()).ifPresent(holder -> {
-            for (var ingredient : holder.value().getIngredients()) if (!ingredient.isEmpty()) {
-                description.append("\n").append(text("inputs")).append(" ");
-                var alternatives = java.util.Arrays.stream(ingredient.getItems()).limit(3).toList();
-                description.append(items(alternatives));
-                if (ingredient.getItems().length > 1) description.append(text("or"));
-                if (ingredient.getItems().length > 3) description.append("…");
-            }
+            lines.addAll(candidateInputLines(holder.value().getIngredients()));
         });
-        if (candidate.rejection() != null) description.append("\n").append(Component.translatable("reason.craftable."
+        if (candidate.rejection() != null) lines.add(Component.translatable("reason.craftable."
                 + candidate.rejection().name().toLowerCase(java.util.Locale.ROOT)));
-        return description;
+        return lines;
     }
+
+    private static List<Component> candidateInputLines(List<net.minecraft.world.item.crafting.Ingredient> ingredients) {
+        var groups = new ArrayList<CandidateInputGroup>();
+        for (var ingredient : ingredients) if (!ingredient.isEmpty()) {
+            var options = new ArrayList<ItemStack>();
+            for (var option : ingredient.getItems()) if (options.stream().noneMatch(s -> ItemStack.isSameItemSameComponents(s, option)))
+                options.add(option.copyWithCount(1));
+            if (options.isEmpty()) continue;
+            // Compare complete candidate sets BEFORE display truncation. Equal
+            // OR slots mean N independent choices, not N of every alternative
+            // and not a requirement to pick the same material for all slots.
+            int at = -1;
+            for (int i = 0; i < groups.size(); i++) {
+                var other = groups.get(i).options();
+                if (other.size() == options.size() && other.stream().allMatch(s -> options.stream()
+                        .anyMatch(o -> ItemStack.isSameItemSameComponents(s, o)))) { at = i; break; }
+            }
+            if (at < 0) groups.add(new CandidateInputGroup(options, 1));
+            else groups.set(at, new CandidateInputGroup(groups.get(at).options(), groups.get(at).count() + 1));
+        }
+        var lines = new ArrayList<Component>();
+        for (var group : groups) {
+            var line = text("recipe_inputs").copy().append(" ");
+            if (group.options().size() == 1) line.append(items(List.of(group.options().getFirst().copyWithCount(group.count()))));
+            else {
+                var names = Component.empty();
+                for (var option : group.options().stream().limit(3).toList()) {
+                    if (!names.getString().isEmpty()) names.append(", ");
+                    names.append(option.getHoverName());
+                }
+                if (group.options().size() > 3) names.append(", …");
+                line.append(text("input_options", group.count(), names));
+            }
+            lines.add(line);
+        }
+        return lines;
+    }
+
+    private record CandidateInputGroup(List<ItemStack> options, int count) {}
 
     private void choose(List<String> paths) {
         if (paths.isEmpty()) return;
@@ -228,6 +266,7 @@ public final class CraftingPlanOverlay extends Screen {
         changedAt = System.nanoTime();
         if (resetMaximum) maximum = null;
         draft = null;
+        clearDisplayedWitness();
         queuedAction = false;
         if (pending != Work.CONFIRM && pending != Work.AUTHORIZE) {
             pending = null; inFlight = -1;
@@ -282,6 +321,7 @@ public final class CraftingPlanOverlay extends Screen {
         if (!valid()) { current = null; return; }
         if (resourceScope != ClientBrowsePlanner.scopeVersion()) {
             resourceScope = ClientBrowsePlanner.scopeVersion();
+            clearDisplayedWitness();
             maximum = null; candidateStates.clear();
             if (pending != Work.CONFIRM && pending != Work.AUTHORIZE) {
                 pending = null; inFlight = -1;
@@ -298,6 +338,7 @@ public final class CraftingPlanOverlay extends Screen {
                 notice = text("unknown_result");
                 dirty = false;
                 draft = null;
+                clearDisplayedWitness();
                 controls();
                 return; // Never auto-resend confirmation.
             }
@@ -316,7 +357,9 @@ public final class CraftingPlanOverlay extends Screen {
             controls(); return;
         }
         unavailableSince = 0;
-        if (System.nanoTime() - sentAt < 200_000_000L) return;
+        // The latest explicit intent is local read-only work. Do not leave it
+        // behind an earlier MAX/card cadence after releasing the slider.
+        if (!dirty && System.nanoTime() - sentAt < 200_000_000L) return;
         if (dirty && System.nanoTime() - changedAt >= 150_000_000L) {
             dirty = false;
             ClientBrowsePlanner.preview(begin(Work.PREVIEW), intent, choicePath);
@@ -338,14 +381,30 @@ public final class CraftingPlanOverlay extends Screen {
     }
 
     public static void receive(CraftingDetailPayloads.PreviewResponse payload) {
-        receive(payload, false);
+        receive(payload, false, null, null, -1);
     }
 
-    public static void receiveLocal(CraftingDetailPayloads.PreviewResponse payload) {
-        receive(payload, true);
+    public static void receiveLocal(CraftingDetailPayloads.PreviewResponse payload, CraftRequest request,
+            org.berusted.craftable.planner.CraftPlan.Witness witness, long scope) {
+        receive(payload, true, request, witness, scope);
     }
 
-    private static void receive(CraftingDetailPayloads.PreviewResponse payload, boolean local) {
+    /** Display data only. Server review and confirmation still validate every
+     * step, source, recipe and current resource version of this untrusted route. */
+    public static org.berusted.craftable.planner.CraftPlan.Witness reviewWitness(CraftRequest request, long scope) {
+        var self = current;
+        return self != null && self.valid() && !self.dirty && self.localDraft && self.draft != null
+                && self.draft.view().complete() && self.draft.view().code() == CraftingResultCode.CREATED && !request.partial()
+                && self.resourceScope == scope && self.displayedWitnessScope == scope
+                && request.equals(self.displayedWitnessRequest) ? self.displayedWitness : null;
+    }
+
+    private void clearDisplayedWitness() {
+        displayedWitness = null; displayedWitnessRequest = null; displayedWitnessScope = -1;
+    }
+
+    private static void receive(CraftingDetailPayloads.PreviewResponse payload, boolean local,
+            CraftRequest request, org.berusted.craftable.planner.CraftPlan.Witness witness, long scope) {
         var self = current;
         if (self == null || !self.accepts(payload.menuId(), payload.revision())) return;
         Work work = self.pending;
@@ -358,7 +417,7 @@ public final class CraftingPlanOverlay extends Screen {
             self.controls();
             return;
         }
-        if (code == CraftingResultCode.REQUEST_THROTTLED) { self.dirty = true; return; }
+        if (code == CraftingResultCode.REQUEST_THROTTLED) { self.clearDisplayedWitness(); self.dirty = true; return; }
         // Show the executable partial frontier directly. This is read-only:
         // only an explicit click authorizes the displayed intent server-side.
         // A complete result switches back to full intent to retain witness
@@ -378,6 +437,11 @@ public final class CraftingPlanOverlay extends Screen {
         }
         boolean sameReview = work == Work.AUTHORIZE && self.reviewedIdentity != null
                 && self.reviewedIdentity.equals(payload.draft().view().reviewIdentity());
+        self.clearDisplayedWitness();
+        if (local && payload.draft().view().complete() && code == CraftingResultCode.CREATED && witness != null
+                && scope == ClientBrowsePlanner.scopeVersion() && scope == self.resourceScope) {
+            self.displayedWitness = witness; self.displayedWitnessRequest = request; self.displayedWitnessScope = scope;
+        }
         self.draft = payload.draft();
         if (local && self.choicePath.equals("0") && !self.outputVariants.isEmpty()) {
             // Root variants are presentation context from the vanilla group.
@@ -387,13 +451,14 @@ public final class CraftingPlanOverlay extends Screen {
                     ClientBrowsePlanner.outputChoices(self.draft.view(), self.intent, self.outputVariants));
         }
         self.displayedView = self.draft.view();
+        self.displayedAlternativeGroups = local ? ClientBrowsePlanner.alternativeGroups(self.displayedView) : Map.of();
         if (work != Work.AUTHORIZE) self.submittedWitness = null;
         self.localDraft = local;
         var route = payload.draft().view().operations().stream().map(o -> (Object) List.of(o.path(), o.recipe())).distinct().toList();
         if (self.intent.batches() == 1 && self.singleRoute.isEmpty()) self.singleRoute = route;
         self.routeChanged = !self.singleRoute.isEmpty() && !self.singleRoute.equals(route)
                 || payload.draft().view().nodes().stream().anyMatch(n -> n.recipes().size() > 1);
-        self.graph.show(self.draft.view());
+        self.graph.show(self.draft.view(), self.displayedAlternativeGroups);
         self.slider.syncValue();
         self.rebuildRows();
         self.controls();
@@ -463,7 +528,6 @@ public final class CraftingPlanOverlay extends Screen {
         var candidate = selectedCandidate();
         previousChoice.active = nextChoice.active = candidate != null && draft.choices().candidates().size() > 1;
         applyChoice.active = candidate != null && !dirty;
-        applyChoice.setTooltip(candidate == null ? null : net.minecraft.client.gui.components.Tooltip.create(candidateDescription(candidate)));
         slider.setTooltip(net.minecraft.client.gui.components.Tooltip.create(maximum == null || maximum.pending() ? text("max_waiting")
                 : maximum.proven() ? text("max", maximum.lowerBound()) : text("max_lower", maximum.lowerBound())));
     }
@@ -542,6 +606,22 @@ public final class CraftingPlanOverlay extends Screen {
             g.fill(14, height - 62, width - 14, height - 51, 0xDD202020);
             g.drawString(font, font.substrByWidth(status, width - 36).getString(), 18, height - 61, 0xFFFFFFFF, false);
         }
+        queueEmbeddedTooltip();
+    }
+
+    private void queueEmbeddedTooltip() {
+        // WidgetTooltipHolder queues on Minecraft.screen, which is the parent
+        // menu. Its renderWithTooltip pass has already ended by Render.Post;
+        // this embedded Screen must own the tooltip's final rendering pass.
+        for (var child : children()) if (child instanceof net.minecraft.client.gui.components.AbstractWidget widget
+                && widget.visible && widget.getTooltip() != null
+                && (widget.isHovered() || widget.isFocused() && minecraft.getLastInputType().isKeyboard())) {
+            var positioner = widget.isHovered()
+                    ? new net.minecraft.client.gui.screens.inventory.tooltip.MenuTooltipPositioner(widget.getRectangle())
+                    : new net.minecraft.client.gui.screens.inventory.tooltip.BelowOrAboveWidgetTooltipPositioner(widget.getRectangle());
+            setTooltipForNextRenderPass(widget.getTooltip(), positioner, true);
+            return;
+        }
     }
 
     private void renderChoice(GuiGraphics g, int mx, int my) {
@@ -585,8 +665,8 @@ public final class CraftingPlanOverlay extends Screen {
         // Draw tooltips only after every slot/item. Later texture blits otherwise
         // cover parts of the tooltip even though it was requested for an earlier slot.
         if (!hoveredIngredient.isEmpty()) g.renderTooltip(font, hoveredIngredient, mx, my);
-        if (mx >= cx + 30 && mx < cx + 76 && my >= cy + 30 && my < cy + 60)
-            g.renderComponentTooltip(font, List.of(candidateLabel(candidate), candidateDescription(candidate)), mx, my);
+        if (mx >= cx + 30 && mx < cx + 76 && my >= cy + 30 && my < cy + 60 || applyChoice.isHoveredOrFocused())
+            g.renderComponentTooltip(font, candidateTooltip(candidate), mx, my);
     }
 
     private void drawChoiceLabel(GuiGraphics g, Component label, int centerX, int y) {
@@ -685,9 +765,7 @@ public final class CraftingPlanOverlay extends Screen {
             if (count == intent.batches()) return;
             // Do not rebuild the dragged widget: that loses vanilla pointer
             // capture. Only replace the intent; debounce the server request.
-            intent = intent.withBatches(count);
-            generation++; dirty = true; draft = null; queuedAction = false; changedAt = System.nanoTime();
-            controls();
+            change(intent.withBatches(count), false);
         }
         @Override public void onRelease(double x, double y) {
             super.onRelease(x, y);

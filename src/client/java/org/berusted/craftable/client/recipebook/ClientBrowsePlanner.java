@@ -40,6 +40,11 @@ public final class ClientBrowsePlanner {
     private static DetailWork detail;
     private static CraftRequest retainedRequest;
     private static SearchResult retainedResult;
+    // One presentation-only material ceiling within the same immutable scope.
+    // Larger unknown verdicts remain unknown; they are not full-failure proof.
+    private static CraftRequest ceilingRequest;
+    private static java.util.OptionalInt materialCeiling = java.util.OptionalInt.empty();
+    private static boolean ceilingAttempted;
     private static long scopeVersion;
     private static long lastTickNanos, foregroundSlices, hiddenSlices;
     private ClientBrowsePlanner() {}
@@ -97,7 +102,8 @@ public final class ClientBrowsePlanner {
                 // Reserve both bounded continuations and the entire minimal
                 // verdict table before publishing this dynamic value scope.
                 long estimate = 2L * receiving.bytes() + 256L * decoded.inputs().size()
-                        + 128L * decoded.unlocked().size() + 36L * 1024 + 2L * 4 * 1024 * 1024 + 16_384L * 128;
+                        + 128L * decoded.unlocked().size() + 36L * 1024 + 64L * 1024
+                        + 2L * 4 * 1024 * 1024 + 16_384L * 128;
                 if (estimate > 16L * 1024 * 1024) throw new IllegalStateException("Local browsing memory bound");
                 if (grant != null && receiving != null && decoded.session().equals(receiving.session())
                         && decoded.recipes() == receiving.recipes() && decoded.resources() == receiving.resources()
@@ -198,7 +204,7 @@ public final class ClientBrowsePlanner {
         if (result.isPresent()) {
             if (hiddenTurn) background = null; else front = null;
             if (selected.owner != null) finishDetail(selected, result.get());
-            else ClientRecipeStatusStore.completeLocal(selected.id, result.get(), selected.search.fullEvidence(), selected.diagnostic);
+            else ClientRecipeStatusStore.completeLocal(selected.request, result.get(), selected.search.fullEvidence(), selected.diagnostic);
         }
         return result.isPresent();
     }
@@ -209,7 +215,7 @@ public final class ClientBrowsePlanner {
         // only an earlier batch of 64 IDs. Faster dispatch must not bypass the
         // closure and turn hundreds of excluded roots into quantity searches.
         var request = new CraftRequest(id, 1, false, drops, policy, Map.of());
-        var evidence = closure.excludes(input, request);
+        var evidence = closure.excludes(input, mathematical(request, false));
         if (evidence == null) return true;
         ClientRecipeStatusStore.completeLocal(id,
                 SearchResult.blocked(org.berusted.craftable.api.CraftingResultCode.MISSING_INGREDIENTS), evidence, false);
@@ -228,25 +234,50 @@ public final class ClientBrowsePlanner {
         var inventory = snapshot.inventory();
         var playerRefs = snapshot.playerReferences();
         var allRefs = snapshot.references();
-        var search = new CraftSearch(input, request, snapshot.sources(), SearchBudget.resumable(8_000_000L),
+        var search = new CraftSearch(input, mathematical(request, diagnostic), snapshot.sources(), SearchBudget.resumable(8_000_000L),
                 plan -> MainInventoryInsertion.simulate(inventory, snapshot.inventoryMaximum(), plan,
                         playerRefs, allRefs, request.allowDrops()).failure()).withReachability(closure);
+        requestCeiling(search, owner);
         var evidence = ClientRecipeStatusStore.evidence(request);
         if (diagnostic) search.withFullEvidence(evidence)
                 .withDiagnosticBudget(SearchBudget.resumable(8_000_000L));
         return new Task(request.recipe(), diagnostic, search, owner, request);
     }
 
+    /** Read-only preparation must remain available under NEVER. Keep the
+     * mathematical policy identical in both phases so full evidence matches;
+     * the original intent still controls display, witness and server actions. */
+    private static CraftRequest mathematical(CraftRequest request, boolean diagnostic) {
+        return new CraftRequest(request.recipe(), request.batches(), diagnostic, request.allowDrops(),
+                CraftRequest.PartialPolicy.EXPLICIT_SAFE, request.selections());
+    }
+
     public static long scopeVersion() { return scopeVersion; }
 
-    /** Export only the already retained, matching complete detail plan. A
+    /** Presentation-only full OR identity; no new query or catalog build. */
+    public static Map<String, Object> alternativeGroups(PlanView view) {
+        return ready() ? view.alternativeGroups(input) : Map.of();
+    }
+
+    /** Export only an already published review or matching retained complete plan. A
      * missing/partial plan uses the existing explicit server path, not another
      * local search or a second plan cache. */
     public static org.berusted.craftable.planner.CraftPlan.Witness witness(CraftRequest request) {
-        if (!ready() || request.partial() || retainedRequest == null || retainedResult == null
+        if (!ready() || request.partial()) return null;
+        var displayed = org.berusted.craftable.client.CraftingPlanOverlay.reviewWitness(effective(request), scopeVersion);
+        if (displayed != null) return displayed;
+        if (retainedRequest == null || retainedResult == null
                 || !effective(request).withPartial(false).equals(retainedRequest.withPartial(false))) return null;
+        return boundedWitness(request, retainedResult);
+    }
+
+    /** A bounded, untrusted replay description of the actual displayed result,
+     * not another retained plan or an execution authorization. */
+    private static CraftPlan.Witness boundedWitness(CraftRequest request, SearchResult result) {
+        if (!ready() || request.partial() || result.code() != org.berusted.craftable.api.CraftingResultCode.CREATED
+                || !result.completeSearch()) return null;
         try {
-            var witness = retainedResult.plan().filter(plan -> !plan.partial())
+            var witness = result.plan().filter(plan -> !plan.partial())
                     .map(plan -> org.berusted.craftable.planner.CraftPlan.Witness.from(plan, snapshot)).orElse(null);
             return witness != null && CraftingDetailPayloads.fitsWitness(request, witness, Minecraft.getInstance().level.registryAccess())
                     ? witness : null;
@@ -279,13 +310,26 @@ public final class ClientBrowsePlanner {
     /** One latest UI intent, never a second scheduler or a server request. */
     public static void preview(long sequence, CraftRequest request, String path) {
         detail = new DetailWork(sequence, effective(request), path, false);
-        if (front != null && front.owner == null
-                && front.request.withPartial(false).equals(detail.request.withPartial(false)))
+        if (front != null && front.request.withPartial(false).equals(detail.request.withPartial(false)))
             front = new Task(front.id, front.diagnostic, front.search, detail, front.request);
     }
     public static void maximum(long sequence, CraftRequest request) {
         var effective = effective(request).withBatches(1).withPartial(false);
+        if (!effective.equals(ceilingRequest)) {
+            ceilingRequest = effective; materialCeiling = java.util.OptionalInt.empty(); ceilingAttempted = false;
+        }
         detail = new DetailWork(sequence, effective, "", true);
+    }
+
+    private static void requestCeiling(CraftSearch search, DetailWork work) {
+        if (work != null && work.maximum && work.request.equals(ceilingRequest) && !ceilingAttempted && materialCeiling.isEmpty()) {
+            search.withMaterialUpperBound();
+        }
+    }
+
+    private static int maximumSearchCap(DetailWork work) {
+        return work.request.equals(ceilingRequest) && materialCeiling.isPresent()
+                ? Math.min(snapshot.maxBatches(), materialCeiling.getAsInt()) : snapshot.maxBatches();
     }
     private static CraftRequest effective(CraftRequest request) {
         return new CraftRequest(request.recipe(), request.batches(), request.partial(),
@@ -299,7 +343,7 @@ public final class ClientBrowsePlanner {
             // allowance when a slider or mouse returns to the same request.
             ClientRecipeStatusStore.completeLocal(front.request,
                     SearchResult.blocked(org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED),
-                    front.search.fullEvidence(), true);
+                    front.search.fullEvidence(), front.diagnostic);
             front.search.cancel(); front = null;
         }
     }
@@ -309,8 +353,17 @@ public final class ClientBrowsePlanner {
         if (!ready()) return null;
         CraftRequest request = work.request;
         if (work.maximum) {
+            if (!maximumView(request, snapshot.maxBatches(), maximumSearchCap(work)).pending()) {
+                publishMaximum(work); return null;
+            }
             boolean found = false;
-            for (int count = 1; count <= snapshot.maxBatches(); count++) {
+            boolean bounded = work.request.equals(ceilingRequest) && materialCeiling.isPresent();
+            int cap = maximumSearchCap(work);
+            // After a certified material ceiling, try the largest quantity
+            // first. One positive witness there subsumes all smaller counts;
+            // failures still require every larger count to be checked.
+            for (int visit = 1; visit <= cap; visit++) {
+                int count = bounded ? cap - visit + 1 : visit;
                 if (!ClientRecipeStatusStore.computed(request.withBatches(count))) {
                     request = request.withBatches(count); found = true; break;
                 }
@@ -337,10 +390,17 @@ public final class ClientBrowsePlanner {
             else publishPreview(work, unknown);
             return null;
         }
+        if (!work.maximum && ClientRecipeStatusStore.diagnosticExhausted(request)) {
+            // An unchanged lease, a re-opened detail, or the overlay's intent
+            // promotion cannot replenish a completed diagnostic allowance.
+            publishPreview(work, SearchResult.blocked(ClientRecipeStatusStore.diagnosticReason(request)));
+            return null;
+        }
         // A browsing full-failure proof is valid for the identical intent only;
         // CraftSearch checks it again before entering its diagnostic phase.
         if (background != null && background.request.withPartial(false).equals(request.withPartial(false))) {
             var promoted = new Task(background.id, background.diagnostic, background.search, work, background.request);
+            requestCeiling(promoted.search, work);
             background = null;
             return promoted; // Transfer the same continuation; never duplicate the hidden search.
         }
@@ -349,6 +409,13 @@ public final class ClientBrowsePlanner {
 
     private static void finishDetail(Task task, SearchResult result) {
         ClientRecipeStatusStore.completeLocal(task.request, result, task.search.fullEvidence(), task.diagnostic);
+        if (task.request.withBatches(1).withPartial(false).equals(ceilingRequest)) {
+            // Existing-stock completion does not build a closure or attempt
+            // this certificate. The next quantity keeps its own old allowance.
+            ceilingAttempted |= task.search.materialUpperBoundAttempted();
+            if (task.search.materialUpperBound().isPresent()) materialCeiling = task.search.materialUpperBound();
+        }
+        if (task.owner.maximum) retainMaximum(task.request, result);
         if (task.owner != detail) return; // Changed UI intent cannot receive an old result.
         if (task.owner.maximum) {
             publishMaximum(task.owner);
@@ -359,6 +426,25 @@ public final class ClientBrowsePlanner {
             // Project in a later foreground slice, not after a solver slice
             // that may already have spent the entire 2 ms allowance.
         }
+    }
+
+    private static void retainMaximum(CraftRequest request, SearchResult result) {
+        if (result.plan().isEmpty() || result.plan().orElseThrow().partial()) return;
+        var plan = result.plan().orElseThrow();
+        var delivery = MainInventoryInsertion.simulate(snapshot.inventory(), snapshot.inventoryMaximum(),
+                plan, snapshot.playerReferences(), snapshot.references(), request.allowDrops());
+        var view = PlanView.from(input, request, result, delivery.drops(),
+                snapshot.sources().stream().map(ResourceLedger.Source::stack).toList());
+        var candidate = new org.berusted.craftable.execution.CraftingService.Draft(
+                CraftingDetailPayloads.NO_TOKEN, view, new PlanView.Choices(List.of(), false));
+        // MAX may never be rendered. Check its complete projection before
+        // keeping the one reusable plan, not just its smaller input witness.
+        // Failure leaves the previous slot and the proved full verdict intact;
+        // actual previews still encode their own choice cards below.
+        if (view.code() != org.berusted.craftable.api.CraftingResultCode.CREATED
+                || !view.complete() || CraftingDetailPayloads.boundedLocal(candidate,
+                        Minecraft.getInstance().level.registryAccess()) != candidate) return;
+        retainedRequest = request; retainedResult = result;
     }
 
     private static void publishPreview(DetailWork work, SearchResult result) {
@@ -378,27 +464,32 @@ public final class ClientBrowsePlanner {
             ClientRecipeStatusStore.completeLocal(work.request, SearchResult.blocked(draft.view().code()), null, true);
         }
         CraftingPlanOverlay.receiveLocal(
-                new CraftingDetailPayloads.PreviewResponse(menuId, work.sequence, draft));
+                new CraftingDetailPayloads.PreviewResponse(menuId, work.sequence, draft), work.request,
+                draft.view() == view && view.complete() ? boundedWitness(work.request, result) : null, scopeVersion);
     }
 
     private static void publishMaximum(DetailWork work) {
-        var maximum = maximumView(work.request, snapshot.maxBatches());
+        var maximum = maximumView(work.request, snapshot.maxBatches(), maximumSearchCap(work));
         if (!maximum.pending()) detail = null;
         CraftingPlanOverlay.receiveMaximum(menuId, work.sequence, maximum);
     }
 
     static org.berusted.craftable.execution.CraftingService.Maximum maximumView(CraftRequest intent, int cap) {
-        int lower = 0, highestUnknown = 0;
-        boolean pending = false;
-        for (int count = 1; count <= cap; count++) {
+        return maximumView(intent, cap, cap);
+    }
+
+    static org.berusted.craftable.execution.CraftingService.Maximum maximumView(CraftRequest intent, int cap, int materialCap) {
+        int lower = 0, highestUnknown = 0, highestPending = 0;
+        for (int count = 1; count <= Math.min(cap, materialCap); count++) {
             var request = intent.withBatches(count);
-            if (!ClientRecipeStatusStore.computed(request)) pending = true;
+            if (!ClientRecipeStatusStore.computed(request)) highestPending = count;
             else if (ClientRecipeStatusStore.reason(request) == org.berusted.craftable.api.CraftingResultCode.CREATED) lower = count;
             else if (ClientRecipeStatusStore.exhausted(request)) highestUnknown = count;
         }
         // Capacity is non-monotone. Every larger count must be definitively
         // excluded; an unknown lower count is subsumed by a proven larger one.
         boolean limited = highestUnknown > lower;
+        boolean pending = highestPending > lower;
         return new org.berusted.craftable.execution.CraftingService.Maximum(lower, !pending && !limited, cap, limited, pending);
     }
 
@@ -443,8 +534,9 @@ public final class ClientBrowsePlanner {
 
     private static void abandon(Task task) {
         task.search.cancel();
-        ClientRecipeStatusStore.completeLocal(task.id,
-                SearchResult.blocked(org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED), null, true);
+        ClientRecipeStatusStore.completeLocal(task.request,
+                SearchResult.blocked(org.berusted.craftable.api.CraftingResultCode.SEARCH_BUDGET_EXCEEDED),
+                task.search.fullEvidence(), task.diagnostic);
     }
 
     private static void resetCalculations() {
@@ -457,6 +549,7 @@ public final class ClientBrowsePlanner {
 
     private static void resetDetails() {
         detail = null; retainedRequest = null; retainedResult = null; scopeVersion++;
+        ceilingRequest = null; materialCeiling = java.util.OptionalInt.empty(); ceilingAttempted = false;
     }
 
     public static void invalidate() {
