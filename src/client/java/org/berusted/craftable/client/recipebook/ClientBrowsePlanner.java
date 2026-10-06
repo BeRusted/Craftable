@@ -96,26 +96,7 @@ public final class ClientBrowsePlanner {
             receiver.close(); receiver = null; // Remain unknown; no periodic new search allowance.
         }
         if (decoder != null) {
-            try {
-                if (!decoder.advance(Math.max(1, 2_000_000L - (System.nanoTime() - sliceStart)))) return;
-                var decoded = decoder.result();
-                // Reserve both bounded continuations and the entire minimal
-                // verdict table before publishing this dynamic value scope.
-                long estimate = 2L * receiving.bytes() + 256L * decoded.inputs().size()
-                        + 128L * decoded.unlocked().size() + 36L * 1024 + 64L * 1024
-                        + 2L * 4 * 1024 * 1024 + 16_384L * 128;
-                if (estimate > 16L * 1024 * 1024) throw new IllegalStateException("Local browsing memory bound");
-                if (grant != null && receiving != null && decoded.session().equals(receiving.session())
-                        && decoded.recipes() == receiving.recipes() && decoded.resources() == receiving.resources()
-                        && decoded.session().equals(grant.session()) && decoded.resources() == grant.resources()
-                        && decoded.recipes() == grant.recipes()) {
-                    snapshot = decoded; input = null; resetCalculations();
-                }
-                decoder.close(); decoder = null;
-            } catch (RuntimeException failure) {
-                decoder.close(); decoder = null;
-                Craftable.LOGGER.warn("Rejected browsing snapshot ({})", failure.getClass().getSimpleName());
-            }
+            advanceDecoding(sliceStart);
             return;
         }
         boolean fresh = grant != null && snapshot != null && grant.session().equals(snapshot.session())
@@ -149,6 +130,33 @@ public final class ClientBrowsePlanner {
         // caps cached projections/queue scans on unusually fast machines.
         for (int dispatched = 0; dispatched < 64 && System.nanoTime() - sliceStart < 2_000_000L; dispatched++)
             if (!dispatch(sliceStart)) break;
+    }
+
+    static void advanceDecoding(long sliceStart) {
+        try {
+            if (!decoder.advance(Math.max(1, 2_000_000L - (System.nanoTime() - sliceStart)))) return;
+            var decoded = decoder.result();
+            // Reserve both bounded continuations and the entire minimal
+            // verdict table before publishing this dynamic value scope.
+            long estimate = 2L * receiving.bytes() + 256L * decoded.inputs().size()
+                    + 128L * decoded.unlocked().size() + 36L * 1024 + 64L * 1024
+                    + 2L * 4 * 1024 * 1024 + 16_384L * 128;
+            if (estimate > 16L * 1024 * 1024) throw new IllegalStateException("Local browsing memory bound");
+            // A completed transfer is still useful while afterCreate or an
+            // explicit refresh waits for renewed authority. Retaining values
+            // cannot authorize presentation or execution; both remain gated
+            // by a fresh matching lease. Reject values if a newer lease disagrees.
+            if (receiving != null && decoded.session().equals(receiving.session())
+                    && decoded.recipes() == receiving.recipes() && decoded.resources() == receiving.resources()
+                    && (grant == null || decoded.session().equals(grant.session())
+                    && decoded.resources() == grant.resources() && decoded.recipes() == grant.recipes())) {
+                snapshot = decoded; input = null; resetCalculations();
+            }
+            decoder.close(); decoder = null;
+        } catch (RuntimeException failure) {
+            decoder.close(); decoder = null;
+            Craftable.LOGGER.warn("Rejected browsing snapshot ({})", failure.getClass().getSimpleName());
+        }
     }
 
     private static boolean dispatch(long sliceStart) {
@@ -564,7 +572,8 @@ public final class ClientBrowsePlanner {
         lastCrafted = recipe;
         // Keep the browse nonce and the last page. Ordered play packets ensure
         // pre-action leases precede the result; only a later lease can renew
-        // authority. Pending old chunks cannot publish without that new lease.
+        // authority. Pending old chunks may retain values, but cannot authorize
+        // their use without a fresh matching lease.
         grant = null;
         ClientRecipeStatusStore.authorizeLocal(false);
         resetDetails();

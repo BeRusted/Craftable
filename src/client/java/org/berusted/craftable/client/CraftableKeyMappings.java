@@ -10,7 +10,8 @@ public final class CraftableKeyMappings {
 
     public static final KeyMapping CREATE_ONE = KeyBindingHelper.registerKeyBinding(
             new KeyMapping(
-                    "config.key.name.create_one",
+                    // Vanilla persists bindings by this name; keep it stable across upgrades.
+                    "key.craftable.create_one",
                     InputConstants.Type.KEYSYM,
                     GLFW.GLFW_KEY_C,
                     CATEGORY
