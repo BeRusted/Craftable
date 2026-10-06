@@ -1,0 +1,23 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "org.berusted.craftable.client.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "RecipeBookComponentAccessor",
+    "RecipeBookComponentMixin",
+    "RecipeBookPageAccessor",
+    "RecipeButtonMixin",
+    "RecipeCollectionMixin",
+    "MinecraftMixin",
+    "KeyboardHandlerMixin",
+    "ContainerScreenMixin",
+    "ClientPacketListenerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "overwrites": {
+    "requireAnnotations": true
+  }
+}

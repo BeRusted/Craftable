@@ -17,6 +17,18 @@
 
 ## 操作与验证
 
+项目采用 Gradle 多项目构建：`neoforge/` 和 `fabric/` 分别编译、打包，根目录共享 Gradle Wrapper 和 `gradle.properties`。要求 Java 21，在根目录运行：
+
+```bash
+./gradlew build                  # 构建两个平台
+./gradlew :neoforge:build         # 只构建 NeoForge
+./gradlew :fabric:build           # 只构建 Fabric
+./gradlew :neoforge:runClient     # 启动 NeoForge 开发客户端
+./gradlew :fabric:runClient       # 启动 Fabric 开发客户端
+```
+
+运行结果归档在 `run/verification/<时间>-<组>/`：每步控制台日志和相关游戏日志；JUnit 原始报告在 `neoforge/build/test-results/test/`、HTML 在 `neoforge/build/reports/tests/test/`；客户端截图在 `neoforge/run/client/screenshots/`。这些生成物被 Git 忽略。重复截图会覆盖同名文件，需长期留证时连同批次日志另存。GameTest 故障注入中的预期 ERROR 必须结合测试名和最终断言判断。
+
 单 C 制作一次完整根配方；首次失败后同目标双击 C 表达部分准备；Shift+C 查看链、换配方、选数量并确认。MAX 未证明时只显示可行下界。左键仍按原版从随身材料填格；附近容器材料请用 C。选项页 Craftable 按钮进入配置，客户端不能放宽世界规则。
 
 - 开发测试入口：[测试索引](tests/README.md)（分组命令、覆盖范围、输出与人工边界）。

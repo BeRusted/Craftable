@@ -33,7 +33,9 @@ try {
     $step = 0
     foreach ($command in $commands) {
         $step++
-        $gradleArgs = @($command) + @('--console=plain', '--no-daemon')
+        $gradleArgs = @($command | ForEach-Object {
+            if ($_.StartsWith('-')) { $_ } else { ':neoforge:' + $_ }
+        }) + @('--console=plain', '--no-daemon')
         if ($command -contains 'test') { $gradleArgs += '--no-build-cache' }
         if ($Offline) { $gradleArgs += '--offline' }
         Write-Host ('.\gradlew.bat ' + ($gradleArgs -join ' '))
@@ -47,7 +49,7 @@ try {
         $ErrorActionPreference = 'Stop'
         foreach ($runName in @('gameTestServer', 'client', 'server')) {
             $task = switch ($runName) { 'gameTestServer' { 'runGameTestServer' }; 'client' { 'runClient' }; 'server' { 'runServer' } }
-            $log = Join-Path $projectRoot "run/$runName/logs/latest.log"
+            $log = Join-Path $projectRoot "neoforge/run/$runName/logs/latest.log"
             if ($command -contains $task -and (Test-Path -LiteralPath $log)) {
                 Copy-Item -LiteralPath $log -Destination (Join-Path $outputDir "$step-$runName.log")
             }

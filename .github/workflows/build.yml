@@ -10,7 +10,16 @@ on:
 
 jobs:
   build:
+    name: Build ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - loader: fabric
+            name: Fabric
+          - loader: neoforge
+            name: NeoForge
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,5 +36,12 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build with Gradle
-        run: ./gradlew build
+      - name: Build ${{ matrix.name }} with Gradle
+        run: ./gradlew :${{ matrix.loader }}:build --console=plain
+
+      - name: Upload ${{ matrix.name }} JARs
+        uses: actions/upload-artifact@v4
+        with:
+          name: craftable-${{ matrix.loader }}
+          path: ${{ matrix.loader }}/build/libs/*.jar
+          if-no-files-found: error

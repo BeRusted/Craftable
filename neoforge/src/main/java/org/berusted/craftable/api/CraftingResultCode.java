@@ -1,0 +1,23 @@
+package org.berusted.craftable.api;
+
+/** Stable result codes shared by server execution and client feedback. */
+public enum CraftingResultCode {
+    CREATED,
+    RECIPE_NOT_FOUND,
+    UNSUPPORTED_RECIPE,
+    MISSING_WORKSTATION,
+    MISSING_INGREDIENTS,
+    NO_OUTPUT_SPACE,
+    ENVIRONMENT_CHANGED,
+    INVALID_CONTEXT,
+    REQUEST_THROTTLED,
+    INTERNAL_ERROR,
+    RECIPE_LOCKED,
+    SEARCH_BUDGET_EXCEEDED,
+    PROTECTED_INGREDIENTS,
+    PARTIAL_CREATED,
+    NO_USEFUL_PROGRESS,
+    CONFIRMATION_REQUIRED,
+    CONFIRMATION_EXPIRED,
+    DROP_LIMIT_EXCEEDED
+}
