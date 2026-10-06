@@ -16,6 +16,15 @@ public final class CraftableServerConfig {
 
     private CraftableServerConfig() {}
 
+    public static CraftingRules craftingRules() {
+        return new CraftingRules(VALUES.partialExecution.get(), VALUES.surplusDelivery.get(), VALUES.maxCraftBatch.get());
+    }
+
+    public enum SurplusDelivery { REQUIRE_SPACE, DROP_OVERFLOW }
+
+    public record CraftingRules(org.berusted.craftable.planner.CraftRequest.PartialPolicy partialPolicy,
+            SurplusDelivery surplusDelivery, int maxBatches) {}
+
     /** Takes one coherent copy so a live config reload cannot split a scan across two settings. */
     public static EnvironmentScanSettings scanSettings() {
         return new EnvironmentScanSettings(
@@ -30,6 +39,9 @@ public final class CraftableServerConfig {
         private final ModConfigSpec.IntValue verticalRadius;
         private final ModConfigSpec.IntValue previewCacheTicks;
         private final ModConfigSpec.BooleanValue includeEnderChest;
+        private final ModConfigSpec.EnumValue<org.berusted.craftable.planner.CraftRequest.PartialPolicy> partialExecution;
+        private final ModConfigSpec.EnumValue<SurplusDelivery> surplusDelivery;
+        private final ModConfigSpec.IntValue maxCraftBatch;
 
         private Values(ModConfigSpec.Builder builder) {
             builder.push("environment");
@@ -61,6 +73,17 @@ public final class CraftableServerConfig {
                     .comment("Whether a nearby usable ender chest grants access to the player's personal ender inventory.")
                     .translation("config.craftable.server.include_ender_chest")
                     .define("includeEnderChest", true);
+            builder.pop();
+            builder.push("crafting");
+            partialExecution = builder.translation("config.craftable.server.partial_execution")
+                    .comment("Only applies to an explicit partial request; a single C never consumes a partial plan.")
+                    .defineEnum("partialExecution", org.berusted.craftable.planner.CraftRequest.PartialPolicy.EXPLICIT_SAFE);
+            surplusDelivery = builder.translation("config.craftable.server.surplus_delivery")
+                    .comment("Primary output must fit. DROP_OVERFLOW throws only surplus that will not fit; drops can be lost.")
+                    .defineEnum("surplusDelivery", SurplusDelivery.REQUIRE_SPACE);
+            maxCraftBatch = builder.translation("config.craftable.server.max_craft_batch")
+                    .comment("Maximum root recipe executions per request; total intermediate steps are separately bounded.")
+                    .defineInRange("maxCraftBatch", 64, 1, 64);
             builder.pop();
         }
     }

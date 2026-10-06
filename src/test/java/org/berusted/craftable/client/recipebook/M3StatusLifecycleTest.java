@@ -7,49 +7,55 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Preserve M3 UI lifecycle checks under protocol 7's independent lease model.
+ * Old per-recipe packet sequencing no longer exists in production. */
 class M3StatusLifecycleTest {
     private static final ResourceLocation A = ResourceLocation.withDefaultNamespace("stick");
     private static final ResourceLocation B = ResourceLocation.withDefaultNamespace("diamond_pickaxe");
     @AfterEach void clear() { ClientRecipeStatusStore.clear(); }
-    private void put(ResourceLocation id, long request, long generation, CraftingStatus status) {
-        ClientRecipeStatusStore.put(id, request, status, CraftingResultCode.MISSING_INGREDIENTS, generation, 100);
+    private void put(ResourceLocation id, CraftingStatus status) {
+        ClientRecipeStatusStore.completeLocal(id, status,
+                status == CraftingStatus.CRAFTABLE ? CraftingResultCode.CREATED : CraftingResultCode.MISSING_INGREDIENTS,
+                null, false);
     }
-    @Test void creationRetainsPreviousPositiveDisplayWhileRechecking() {
-        put(A, 1, 1, CraftingStatus.CRAFTABLE);
+    @Test void expiredAuthorizationHidesGreenWithoutLosingTheConclusion() {
+        ClientRecipeStatusStore.beginLocal(); ClientRecipeStatusStore.authorizeLocal(true);
+        put(A, CraftingStatus.CRAFTABLE);
         ClientRecipeStatusStore.invalidate(4);
-        assertEquals(CraftingStatus.CRAFTABLE, ClientRecipeStatusStore.get(A, false));
-        assertEquals(ClientRecipeStatusStore.Lifecycle.PENDING, ClientRecipeStatusStore.lifecycle(A));
-        assertFalse(ClientRecipeStatusStore.isFresh(A, 101, 10));
-        put(A, 5, 2, CraftingStatus.BLOCKED);
         assertEquals(CraftingStatus.BLOCKED, ClientRecipeStatusStore.get(A, false));
-        assertEquals(ClientRecipeStatusStore.Lifecycle.KNOWN, ClientRecipeStatusStore.lifecycle(A));
+        assertEquals(ClientRecipeStatusStore.Lifecycle.PENDING, ClientRecipeStatusStore.lifecycle(A));
+        assertTrue(ClientRecipeStatusStore.computed(A));
+        ClientRecipeStatusStore.authorizeLocal(true);
+        assertEquals(CraftingStatus.CRAFTABLE, ClientRecipeStatusStore.get(A, false));
     }
-    @Test void creationBarrierRejectsPreCommitResponsesEvenForPreviouslyUnknownRecipes() {
-        ClientRecipeStatusStore.invalidate(4);
-        put(B, 3, 1, CraftingStatus.CRAFTABLE);
+    @Test void completedWorkCannotPublishOutsideALocalScope() {
+        ClientRecipeStatusStore.clear();
+        put(B, CraftingStatus.CRAFTABLE);
         assertEquals(ClientRecipeStatusStore.Lifecycle.UNKNOWN, ClientRecipeStatusStore.lifecycle(B));
     }
-    @Test void oldGenerationCannotOverwriteAnotherRecipesNewerSnapshot() {
-        put(A, 2, 9, CraftingStatus.CRAFTABLE);
-        put(B, 3, 8, CraftingStatus.CRAFTABLE);
+    @Test void replacementResourcesDiscardEveryOldVerdict() {
+        ClientRecipeStatusStore.beginLocal(); ClientRecipeStatusStore.authorizeLocal(true);
+        put(A, CraftingStatus.CRAFTABLE); put(B, CraftingStatus.CRAFTABLE);
+        ClientRecipeStatusStore.beginLocal(); ClientRecipeStatusStore.authorizeLocal(true);
+        assertEquals(ClientRecipeStatusStore.Lifecycle.UNKNOWN, ClientRecipeStatusStore.lifecycle(A));
         assertEquals(ClientRecipeStatusStore.Lifecycle.UNKNOWN, ClientRecipeStatusStore.lifecycle(B));
     }
-    @Test void disconnectClearsKnowledgeAndBarrier() {
-        put(A, 3, 9, CraftingStatus.CRAFTABLE);
-        ClientRecipeStatusStore.invalidate(5);
+    @Test void disconnectClearsKnowledgeAndAuthorization() {
+        ClientRecipeStatusStore.beginLocal(); ClientRecipeStatusStore.authorizeLocal(true);
+        put(A, CraftingStatus.CRAFTABLE);
         ClientRecipeStatusStore.clear();
         assertEquals(ClientRecipeStatusStore.Lifecycle.UNKNOWN, ClientRecipeStatusStore.lifecycle(A));
-        assertTrue(ClientRecipeStatusStore.accepts(1, 1));
+        assertFalse(ClientRecipeStatusStore.computed(A));
     }
-
-    @Test void unchangedRefreshDoesNotRebuildPageButPendingResolutionDoes() {
-        put(A, 1, 1, CraftingStatus.CRAFTABLE);
+    @Test void unchangedRenewalDoesNotRebuildPageButPendingResolutionDoes() {
+        ClientRecipeStatusStore.beginLocal(); ClientRecipeStatusStore.authorizeLocal(true);
+        put(A, CraftingStatus.CRAFTABLE);
         long revision = ClientRecipeStatusStore.revision();
-        put(A, 2, 2, CraftingStatus.CRAFTABLE);
+        put(A, CraftingStatus.CRAFTABLE); ClientRecipeStatusStore.authorizeLocal(true);
         assertEquals(revision, ClientRecipeStatusStore.revision());
         ClientRecipeStatusStore.invalidate(3);
         long pendingRevision = ClientRecipeStatusStore.revision();
-        put(A, 4, 3, CraftingStatus.CRAFTABLE);
+        ClientRecipeStatusStore.authorizeLocal(true);
         assertTrue(ClientRecipeStatusStore.revision() > pendingRevision);
     }
 }

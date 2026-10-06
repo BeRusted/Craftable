@@ -17,6 +17,7 @@ public final class RecipeBookProjection {
     private static boolean restoring;
     private RecipeBookProjection() {}
     public static RecipeBookComponent component(Screen screen) {
+        if (screen instanceof org.berusted.craftable.client.menu.AmbientInventoryScreen ambient) return ambient.getRecipeBookComponent();
         if (screen instanceof InventoryScreen inventory) return inventory.getRecipeBookComponent();
         if (screen instanceof net.minecraft.client.gui.screens.inventory.CraftingScreen crafting) return crafting.getRecipeBookComponent();
         return null;
