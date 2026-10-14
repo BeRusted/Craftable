@@ -43,6 +43,8 @@ public final class ClientBrowsePlanner {
     private static CraftRequest.PartialPolicy policy;
     private static long searches, slices;
     private static DetailWork detail;
+    private static MaximumProjection maximumProjection;
+    private static long maximumProjections;
     private static CraftRequest retainedRequest;
     private static SearchResult retainedResult;
     // One presentation-only material ceiling within the same immutable scope.
@@ -109,7 +111,7 @@ public final class ClientBrowsePlanner {
                 if (grant != null && receiving != null && decoded.session().equals(receiving.session())
                         && decoded.recipes() == receiving.recipes() && decoded.resources() == receiving.resources()
                         && decoded.session().equals(grant.session()) && decoded.resources() == grant.resources()
-                        && decoded.recipes() == grant.recipes()) {
+                        && decoded.recipes() == grant.recipes() && matchesRules(decoded, grant)) {
                     snapshot = decoded; input = null; resetCalculations();
                 }
                 decoder.close(); decoder = null;
@@ -120,7 +122,7 @@ public final class ClientBrowsePlanner {
             return;
         }
         boolean fresh = grant != null && snapshot != null && grant.session().equals(snapshot.session())
-                && grant.resources() == snapshot.resources() && now <= grant.expires();
+                && grant.resources() == snapshot.resources() && matchesRules(snapshot, grant) && now <= grant.expires();
         if (grant == null) { ClientRecipeStatusStore.authorizeLocal(false); return; }
         CATALOG.observe(connection, generation, collection, mc.level.registryAccess());
         if (CATALOG.state() == PlanningInput.Catalog.State.BUILDING) {
@@ -130,7 +132,8 @@ public final class ClientBrowsePlanner {
             return; // Catalog and search never each receive a 2 ms slice in one tick.
         }
         if (CATALOG.state() != PlanningInput.Catalog.State.READY || snapshot == null || grant == null) return;
-        if (input == null) input = CATALOG.bind(snapshot.workbench(), snapshot.limitedCrafting(), snapshot.unlocked());
+        if (input == null) input = CATALOG.bind(snapshot.workbench(), snapshot.limitedCrafting(), snapshot.unlocked(),
+                snapshot.directPreparation());
         boolean agrees = input.fingerprint().equals(grant.fingerprint());
         if (!agrees) { ClientRecipeStatusStore.authorizeLocal(false); return; }
         boolean effectiveDrops = snapshot.allowDrops() && CraftableClientConfig.allowSurplusDrops();
@@ -183,11 +186,12 @@ public final class ClientBrowsePlanner {
         if (!hiddenTurn && front == null && detailReady) {
             if (System.nanoTime() - sliceStart >= 2_000_000L) return false;
             var previous = detail;
+            long projected = maximumProjections;
             front = detailTask();
             if (front == null) {
                 // Cached projection also uses a foreground slice, never the
                 // hidden head's reserved fourth turn.
-                if (detail == previous) return false; // Waiting for authority is not completed work.
+                if (detail == previous && maximumProjections == projected) return false; // Waiting consumes no turn.
                 TURNS.served(false); slices++; foregroundSlices++; return true;
             }
         }
@@ -236,6 +240,7 @@ public final class ClientBrowsePlanner {
         var playerRefs = snapshot.playerReferences();
         var allRefs = snapshot.references();
         var search = new CraftSearch(input, mathematical(request, diagnostic), snapshot.sources(), SearchBudget.resumable(8_000_000L),
+                snapshot.maxPlanSteps(),
                 plan -> MainInventoryInsertion.simulate(inventory, snapshot.inventoryMaximum(), plan,
                         playerRefs, allRefs, request.allowDrops()).failure()).withReachability(closure);
         requestCeiling(search, owner);
@@ -288,6 +293,7 @@ public final class ClientBrowsePlanner {
         var mc = Minecraft.getInstance();
         return input != null && closure != null && snapshot != null && grant != null && mc.level != null
                 && snapshot.session().equals(grant.session()) && snapshot.resources() == grant.resources()
+                && matchesRules(snapshot, grant)
                 && mc.level.getGameTime() <= grant.expires() && input.fingerprint().equals(grant.fingerprint());
     }
 
@@ -310,6 +316,7 @@ public final class ClientBrowsePlanner {
 
     /** One latest UI intent, never a second scheduler or a server request. */
     public static void preview(long sequence, CraftRequest request, String path) {
+        maximumProjection = null; // A replaced intent cannot pin an unprojected MAX result.
         detail = new DetailWork(sequence, effective(request), path, false);
         if (front != null && front.request.withPartial(false).equals(detail.request.withPartial(false)))
             front = new Task(front.id, front.diagnostic, front.search, detail, front.request);
@@ -319,6 +326,7 @@ public final class ClientBrowsePlanner {
         if (!effective.equals(ceilingRequest)) {
             ceilingRequest = effective; materialCeiling = java.util.OptionalInt.empty(); ceilingAttempted = false;
         }
+        maximumProjection = null;
         detail = new DetailWork(sequence, effective, "", true);
     }
 
@@ -339,6 +347,7 @@ public final class ClientBrowsePlanner {
 
     public static void cancelDetails() {
         detail = null;
+        maximumProjection = null;
         if (front != null && front.owner != null) {
             // Cancellation is terminal for this identity, not a fresh 8 ms
             // allowance when a slider or mouse returns to the same request.
@@ -352,6 +361,16 @@ public final class ClientBrowsePlanner {
     private static Task detailTask() {
         var work = detail;
         if (!ready()) return null;
+        if (maximumProjection != null && maximumProjection.owner == work) {
+            // Large MAX projections/encoding start in a later foreground turn,
+            // never as uncharged tail work after the solver's spent slice.
+            if (Minecraft.getInstance().level.getGameTime() < maximumProjection.notBeforeTick) return null;
+            retainMaximum(maximumProjection.request, maximumProjection.result);
+            maximumProjections++;
+            maximumProjection = null;
+            publishMaximum(work);
+            return null;
+        }
         CraftRequest request = work.request;
         if (work.maximum) {
             if (!maximumView(request, snapshot.maxBatches(), maximumSearchCap(work)).pending()) {
@@ -416,10 +435,12 @@ public final class ClientBrowsePlanner {
             ceilingAttempted |= task.search.materialUpperBoundAttempted();
             if (task.search.materialUpperBound().isPresent()) materialCeiling = task.search.materialUpperBound();
         }
-        if (task.owner.maximum) retainMaximum(task.request, result);
         if (task.owner != detail) return; // Changed UI intent cannot receive an old result.
         if (task.owner.maximum) {
-            publishMaximum(task.owner);
+            if (result.plan().isPresent() && !result.plan().orElseThrow().partial()) {
+                maximumProjection = new MaximumProjection(task.owner, task.request, result,
+                        Minecraft.getInstance().level.getGameTime() + 1);
+            } else publishMaximum(task.owner);
         } else {
             if (!task.diagnostic && result.plan().isEmpty() && task.search.fullEvidence() != null)
                 return; // Next foreground slice upgrades the same proof to diagnostic, without full re-search.
@@ -509,6 +530,11 @@ public final class ClientBrowsePlanner {
             if (!snapshot.session().equals(value.session())) ClientRecipeStatusStore.beginLocal();
             snapshot = null; input = null; resetCalculations();
         }
+        // A consent-only rule change must retire stale calculations even if a
+        // peer sends no replacement content yet. Static knowledge is reusable.
+        if (snapshot != null && !matchesRules(snapshot, value)) {
+            snapshot = null; input = null; resetCalculations();
+        }
         if (value.header() != null) {
             if (receiver != null) receiver.close();
             if (decoder != null) decoder.close(); decoder = null;
@@ -533,6 +559,15 @@ public final class ClientBrowsePlanner {
         return menu != null && mc.player != null && mc.player.containerMenu == menu && id == menuId && version == revision;
     }
 
+    private static boolean matchesRules(BrowsingSnapshot values, CraftingDetailPayloads.BrowseLease lease) {
+        var rules = lease.rules();
+        return values.maxPlanSteps() == rules.maxPlanSteps() && values.maxBatches() == rules.maxBatches()
+                && values.partialPolicy() == rules.partialPolicy()
+                && values.directPreparation().equals(rules.directPreparation())
+                && values.allowDrops() == (rules.surplusDelivery()
+                        == org.berusted.craftable.config.CraftableServerConfig.SurplusDelivery.DROP_OVERFLOW);
+    }
+
     private static void abandon(Task task) {
         task.search.cancel();
         ClientRecipeStatusStore.completeLocal(task.request,
@@ -550,6 +585,7 @@ public final class ClientBrowsePlanner {
 
     private static void resetDetails() {
         detail = null; retainedRequest = null; retainedResult = null; scopeVersion++;
+        maximumProjection = null;
         ceilingRequest = null; materialCeiling = java.util.OptionalInt.empty(); ceilingAttempted = false;
     }
 
@@ -618,5 +654,6 @@ public final class ClientBrowsePlanner {
         void served(boolean hidden) { consecutive = hidden ? 0 : Math.min(3, consecutive + 1); }
     }
     private record Task(ResourceLocation id, boolean diagnostic, CraftSearch search, DetailWork owner, CraftRequest request) {}
+    private record MaximumProjection(DetailWork owner, CraftRequest request, SearchResult result, long notBeforeTick) {}
     private record DetailWork(long sequence, CraftRequest request, String path, boolean maximum) {}
 }

@@ -26,4 +26,11 @@ class EnvironmentSnapshotCacheKeyTest {
         assertFalse(same.canReuse(snapshot, 99));
         assertFalse(moved.canReuse(snapshot, 101));
     }
+
+    @Test void zeroDisablesDiagnosticReuseEvenWithinTheCaptureTick() {
+        var disabled = new EnvironmentScanSettings(8, 4, 0, true);
+        var snapshot = new EnvironmentSnapshot(Level.OVERWORLD, BlockPos.ZERO, disabled, 100, 7, List.of(), List.of());
+        assertFalse(new EnvironmentSnapshotCacheKey(Level.OVERWORLD.location(), BlockPos.ZERO, disabled).canReuse(snapshot, 100));
+        assertFalse(new EnvironmentSnapshotCacheKey(Level.OVERWORLD.location(), BlockPos.ZERO, disabled).canReuse(snapshot, 101));
+    }
 }

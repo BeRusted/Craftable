@@ -145,7 +145,7 @@ final class M4BulkQuantityScenario {
             require(witness != null && witness == read(overlay(), "displayedWitness")
                     && CraftingDetailPayloads.fitsWitness(intent(), witness, mc.level.registryAccess()),
                     "Published bulk review has no bounded matching witness");
-            require(witness.steps().size() <= org.berusted.craftable.planner.SearchBudget.MAX_STEPS,
+            require(witness.steps().size() <= org.berusted.craftable.planner.SearchBudget.DEFAULT_MAX_STEPS,
                     "Published bulk review exceeded the existing witness bound");
             require(inventory(mc, 64, 0) && mc.player.containerMenu == menu, "Bulk preview wrote resources or replaced menu");
             reviewed = draft().view().reviewIdentity();

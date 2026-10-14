@@ -5,6 +5,7 @@
 - 交互补充：[16-m4-interaction-and-performance.md](16-m4-interaction-and-performance.md) 细化余料掉落、双击 C、可编辑物品链、滑槽/MAX 与集中效率阶段。
 - 前置：M0–M3 已验收；联机双方必须使用当前同一 JAR，不能混用旧协议。
 - 本文是 M4 的具体契约；与早期产品草案冲突时以本文及 ADR-0006 为准。实施顺序见 [15-m4-implementation-plan.md](15-m4-implementation-plan.md)。
+- 历史范围：本文的协议、128 步及默认安全白名单属于已关闭 M4。当前可配置步数和服务端配方级直接部分准备许可见 [Pre-M5 合同与独立验收](21-pre-m5-transition.md#43-p5a服务端直接部分准备规则)，不改写本页历史验收。
 
 ## 1. 唯一目标与范围
 

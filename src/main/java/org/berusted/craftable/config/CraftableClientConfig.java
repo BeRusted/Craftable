@@ -5,6 +5,8 @@ import org.apache.commons.lang3.tuple.Pair;
 
 /** Client presentation and request preferences; they can only tighten world rules. */
 public final class CraftableClientConfig {
+    public static final int MIN_DOUBLE_PRESS_MILLIS = 150;
+    public static final int MAX_DOUBLE_PRESS_MILLIS = 800;
     public static final ModConfigSpec SPEC;
     private static final Values VALUES;
 
@@ -29,6 +31,39 @@ public final class CraftableClientConfig {
     public static org.berusted.craftable.planner.CraftRequest.PartialPolicy partialPolicy() { return VALUES.partialPolicy.get(); }
     public static boolean allowSurplusDrops() { return VALUES.allowSurplusDrops.get(); }
     public static int doublePressMillis() { return VALUES.doublePressMillis.get(); }
+
+    /** One draft value for the native settings UI; this is not a second config. */
+    public record Preferences(boolean recipeBookEnhancements, boolean detailedFailureFeedback, boolean unlockedOnly,
+            org.berusted.craftable.planner.CraftRequest.PartialPolicy partialPolicy,
+            boolean allowSurplusDrops, int doublePressMillis) {
+        public Preferences {
+            java.util.Objects.requireNonNull(partialPolicy, "partialPolicy");
+            if (doublePressMillis < MIN_DOUBLE_PRESS_MILLIS || doublePressMillis > MAX_DOUBLE_PRESS_MILLIS)
+                throw new IllegalArgumentException("doublePressMillis must be between 150 and 800");
+        }
+    }
+
+    public static Preferences preferences() {
+        return new Preferences(recipeBookEnhancementsEnabled(), detailedFailureFeedbackEnabled(), unlockedOnly(),
+                partialPolicy(), allowSurplusDrops(), doublePressMillis());
+    }
+
+    public static Preferences defaultPreferences() {
+        return new Preferences(VALUES.recipeBookEnhancements.getDefault(), VALUES.detailedFailureFeedback.getDefault(),
+                VALUES.unlockedOnly.getDefault(), VALUES.partialPolicy.getDefault(),
+                VALUES.allowSurplusDrops.getDefault(), VALUES.doublePressMillis.getDefault());
+    }
+
+    /** Save through the registered spec; personal preferences can only tighten server rules. */
+    public static void savePreferences(Preferences preferences) {
+        VALUES.recipeBookEnhancements.set(preferences.recipeBookEnhancements());
+        VALUES.detailedFailureFeedback.set(preferences.detailedFailureFeedback());
+        VALUES.unlockedOnly.set(preferences.unlockedOnly());
+        VALUES.partialPolicy.set(preferences.partialPolicy());
+        VALUES.allowSurplusDrops.set(preferences.allowSurplusDrops());
+        VALUES.doublePressMillis.set(preferences.doublePressMillis());
+        SPEC.save();
+    }
 
     private static final class Values {
         private final ModConfigSpec.BooleanValue recipeBookEnhancements;
@@ -60,7 +95,7 @@ public final class CraftableClientConfig {
                     .comment("Follow world surplus rules. False additionally requires all outputs to fit.")
                     .define("allowSurplusDrops", true);
             doublePressMillis = builder.translation("config.craftable.client.double_press_millis")
-                    .defineInRange("doublePressMillis", 350, 150, 800);
+                    .defineInRange("doublePressMillis", 350, MIN_DOUBLE_PRESS_MILLIS, MAX_DOUBLE_PRESS_MILLIS);
             builder.pop();
         }
     }

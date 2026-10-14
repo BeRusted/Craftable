@@ -29,6 +29,7 @@ import org.berusted.craftable.recipe.CraftingRecipes.Entry;
 public final class CraftSearch {
     private final org.berusted.craftable.recipe.PlanningInput recipes;
     private final CraftRequest request;
+    private final int maxPlanSteps;
     private final ResourceLedger initial;
     private SearchBudget budget;
     private final SearchBudget fullBudget;
@@ -65,11 +66,24 @@ public final class CraftSearch {
 
     public CraftSearch(CraftingRecipes recipes, CraftRequest request, List<ResourceLedger.Source> sources,
             SearchBudget budget, Function<CraftPlan, CraftingResultCode> validateDelivery) {
-        this(recipes.planningInput(), request, sources, budget, validateDelivery);
+        this(recipes.planningInput(), request, sources, budget, SearchBudget.DEFAULT_MAX_STEPS, validateDelivery);
+    }
+
+    public CraftSearch(CraftingRecipes recipes, CraftRequest request, List<ResourceLedger.Source> sources,
+            SearchBudget budget, int maxPlanSteps, Function<CraftPlan, CraftingResultCode> validateDelivery) {
+        this(recipes.planningInput(), request, sources, budget, maxPlanSteps, validateDelivery);
     }
 
     public CraftSearch(org.berusted.craftable.recipe.PlanningInput recipes, CraftRequest request, List<ResourceLedger.Source> sources,
             SearchBudget budget, Function<CraftPlan, CraftingResultCode> validateDelivery) {
+        this(recipes, request, sources, budget, SearchBudget.DEFAULT_MAX_STEPS, validateDelivery);
+    }
+
+    /** World rules are frozen by the caller. Neither continuation slices nor a
+     * diagnostic allowance may change this limit or replenish the CPU budget. */
+    public CraftSearch(org.berusted.craftable.recipe.PlanningInput recipes, CraftRequest request, List<ResourceLedger.Source> sources,
+            SearchBudget budget, int maxPlanSteps, Function<CraftPlan, CraftingResultCode> validateDelivery) {
+        this.maxPlanSteps = SearchBudget.requireStepLimit(maxPlanSteps);
         this.recipes = recipes;
         this.request = request;
         this.initial = new ResourceLedger(sources);
@@ -131,9 +145,16 @@ public final class CraftSearch {
     public static final class FullEvidence {
         private final Reachability scope;
         private final CraftRequest target;
+        // Presence-only closure exclusion is independent of step limits. A
+        // completed bounded search belongs to its exact frozen limit instead.
+        private final int stepLimit;
         private FullEvidence(Reachability scope, CraftRequest request) {
+            this(scope, request, 0);
+        }
+        private FullEvidence(Reachability scope, CraftRequest request, int stepLimit) {
             this.scope = scope;
             this.target = request.withPartial(false);
+            this.stepLimit = stepLimit == 0 ? 0 : SearchBudget.requireStepLimit(stepLimit);
         }
     }
 
@@ -163,6 +184,7 @@ public final class CraftSearch {
             var unavailable = recipes.unavailable(root);
             if (unavailable != null) return finish(SearchResult.blocked(unavailable));
             if (previousFull != null && previousFull.scope == shared && shared.value != null
+                    && (previousFull.stepLimit == 0 || previousFull.stepLimit == maxPlanSteps)
                     && previousFull.target.equals(request.withPartial(false))) {
                 fullEvidence = previousFull;
                 reachable = shared.value;
@@ -214,7 +236,7 @@ public final class CraftSearch {
                 phase = Phase.CLOSURE;
             } else if (phase == Phase.FULL && failure == CraftingResultCode.MISSING_INGREDIENTS) {
                 // Structural/time truncation never produces negative evidence.
-                fullEvidence = new FullEvidence(shared, request);
+                fullEvidence = new FullEvidence(shared, request, maxPlanSteps);
                 beginPartial();
             } else if (phase == Phase.PARTIAL && capacityDiagnosis != null) {
                 return finish(new SearchResult(capacityDiagnosis.code(), Optional.empty(), capacityDiagnosis.missing(),
@@ -288,7 +310,7 @@ public final class CraftSearch {
                 var plan = new CraftPlan(request.recipe(), request.batches(), state.completed,
                         state.steps, state.ledger.extractions(), state.ledger.delivery(true),
                         state.ledger.delivery(false), mergeMissing(state.missing),
-                        state.steps.stream().allMatch(s -> recipes.find(s.recipe().id()).safePreparation()));
+                        state.steps.stream().allMatch(s -> recipes.allowDirectPreparation(recipes.find(s.recipe().id()))));
                 // A reboxed existing item is not a newly craftable result.
                 // Keep this exact accounting check shared with witness replay.
                 if (!plan.hasMaterialChange()) continue;
@@ -342,7 +364,7 @@ public final class CraftSearch {
                     }
                     state.results.put(finish.grid, -1);
                 } else {
-                    if (state.steps.size() >= SearchBudget.MAX_STEPS) { budget.truncate(); continue; }
+                    if (state.steps.size() >= maxPlanSteps) { budget.truncate(); continue; }
                     CraftPlan.Step step = recipes.assemble(finish.recipe, finish.path, grid.items());
                     if (step == null) { failure = CraftingResultCode.UNSUPPORTED_RECIPE; continue; }
                     if (!budget.alive()) break;
@@ -612,11 +634,12 @@ public final class CraftSearch {
      * groups are checked separately, never added. No route is constructed and
      * passing this test proves neither materials nor delivery feasibility. */
     private boolean exceedsStepLimit() {
+        if (request.batches() > maxPlanSteps) return true; // Every root batch executes at least once.
         // This particular lower bound cannot exceed one root operation plus
         // one direct producer per root slot. Small requests need no producer
         // enumeration/source scan here; the actual search still enforces all
         // upstream steps and passing this check authorizes nothing.
-        if ((long) request.batches() * (1 + root.requirements().size()) <= SearchBudget.MAX_STEPS) return false;
+        if ((long) request.batches() * (1 + root.requirements().size()) <= maxPlanSteps) return false;
         var groups = new LinkedHashMap<Object, Ingredient>();
         var counts = new HashMap<Object, Integer>();
         for (var demand : root.requirements()) {
@@ -631,7 +654,7 @@ public final class CraftSearch {
             if (largest == 0) continue;
             long shortfall = (long) counts.get(group.getKey()) * request.batches() - initial.quantity(ingredient);
             long operations = request.batches() + (Math.max(0, shortfall) + largest - 1) / largest;
-            if (operations > SearchBudget.MAX_STEPS) return true;
+            if (operations > maxPlanSteps) return true;
         }
         return false;
     }
@@ -674,7 +697,7 @@ public final class CraftSearch {
     }
 
     private void remember(State state) {
-        int progress = state.completed * SearchBudget.MAX_STEPS + state.steps.size();
+        int progress = state.completed * maxPlanSteps + state.steps.size();
         // Prefer real production, then actual assigned inputs. Never use the
         // reachability closure as evidence that a candidate's materials exist.
         // Stable ties keep the first route rather than the last visited failure.

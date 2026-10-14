@@ -33,9 +33,12 @@ public final class CraftingDetailPayloads {
 
     public record BrowseLease(int menuId, long revision, UUID session, long recipes, long resources,
             long expires, String fingerprint, CraftingWire.SnapshotHeader header,
-            org.berusted.craftable.config.EnvironmentScanSettings settings, boolean workbench) implements CustomPacketPayload {
+            org.berusted.craftable.config.EnvironmentScanSettings settings, boolean workbench,
+            org.berusted.craftable.config.CraftableServerConfig.CraftingRules rules) implements CustomPacketPayload {
         public BrowseLease {
             identity(menuId, revision);
+            java.util.Objects.requireNonNull(settings);
+            java.util.Objects.requireNonNull(rules);
             if (recipes < 0 || resources < 0 || fingerprint.length() != 64
                     || header != null && (!header.session().equals(session) || header.recipes() != recipes
                     || header.resources() != resources)) throw new IllegalArgumentException("Invalid browse grant");
@@ -45,19 +48,20 @@ public final class CraftingDetailPayloads {
                 (p,b) -> {
                     b.writeVarInt(p.menuId); b.writeVarLong(p.revision); b.writeUUID(p.session);
                     b.writeVarLong(p.recipes); b.writeVarLong(p.resources); b.writeLong(p.expires); b.writeUtf(p.fingerprint,64);
-                    b.writeVarInt(p.settings.horizontalRadius()); b.writeVarInt(p.settings.verticalRadius());
-                    b.writeVarInt(p.settings.previewCacheTicks()); b.writeBoolean(p.settings.includeEnderChest()); b.writeBoolean(p.workbench);
+                    SettingsPayloads.writeScan(b, p.settings); b.writeBoolean(p.workbench);
+                    SettingsPayloads.writeCrafting(b, p.rules);
                     b.writeBoolean(p.header != null);
                     if (p.header != null) { b.writeUUID(p.header.transfer()); b.writeVarInt(p.header.bytes()); b.writeVarInt(p.header.chunks()); b.writeBytes(p.header.digest()); }
                 }, b -> {
                     int menu = b.readVarInt(); long revision = b.readVarLong(); UUID session = b.readUUID();
                     long recipes = b.readVarLong(), resources = b.readVarLong(), expires = b.readLong(); String fingerprint = b.readUtf(64);
-                    var settings = new org.berusted.craftable.config.EnvironmentScanSettings(b.readVarInt(), b.readVarInt(), b.readVarInt(), b.readBoolean());
+                    var settings = SettingsPayloads.readScan(b);
                     boolean workbench = b.readBoolean();
+                    var rules = SettingsPayloads.readCrafting(b);
                     CraftingWire.SnapshotHeader header = null;
                     if (b.readBoolean()) { UUID transfer = b.readUUID(); int bytes = b.readVarInt(), chunks = b.readVarInt(); byte[] digest = new byte[32]; b.readBytes(digest);
                         header = new CraftingWire.SnapshotHeader(session, transfer, recipes, resources, bytes, chunks, digest); }
-                    return new BrowseLease(menu, revision, session, recipes, resources, expires, fingerprint, header, settings, workbench);
+                    return new BrowseLease(menu, revision, session, recipes, resources, expires, fingerprint, header, settings, workbench, rules);
                 });
         @Override public Type<BrowseLease> type() { return TYPE; }
     }

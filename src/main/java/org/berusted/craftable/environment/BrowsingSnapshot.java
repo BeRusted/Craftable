@@ -16,14 +16,38 @@ import org.berusted.craftable.recipe.CraftingRecipes;
  * not execution authority; lease and connection validation belong to its owner. */
 public record BrowsingSnapshot(UUID session, long recipes, long resources, boolean workbench,
         boolean limitedCrafting, Set<ResourceLocation> unlocked, boolean allowDrops,
-        CraftRequest.PartialPolicy partialPolicy, int maxBatches, int inventoryMaximum,
+        CraftRequest.PartialPolicy partialPolicy, int maxBatches, int maxPlanSteps,
+        org.berusted.craftable.config.DirectPreparationPolicy directPreparation, int inventoryMaximum,
         List<ItemStack> inventory, List<Input> inputs) {
     public static final int MAX_INPUTS = 4096;
     public static final int MAX_UNLOCKED = 16_384;
 
+    /** In-process compatibility only. Network and production capture always
+     * supply the server's immutable consent policy, never local defaults. */
+    public BrowsingSnapshot(UUID session, long recipes, long resources, boolean workbench,
+            boolean limitedCrafting, Set<ResourceLocation> unlocked, boolean allowDrops,
+            CraftRequest.PartialPolicy partialPolicy, int maxBatches, int maxPlanSteps, int inventoryMaximum,
+            List<ItemStack> inventory, List<Input> inputs) {
+        this(session, recipes, resources, workbench, limitedCrafting, unlocked, allowDrops, partialPolicy,
+                maxBatches, maxPlanSteps, org.berusted.craftable.config.DirectPreparationPolicy.DEFAULT,
+                inventoryMaximum, inventory, inputs);
+    }
+
+    /** Compatibility for in-process fixtures. The wire always supplies the
+     * world-owned step limit; a local default is never a remote rule. */
+    public BrowsingSnapshot(UUID session, long recipes, long resources, boolean workbench,
+            boolean limitedCrafting, Set<ResourceLocation> unlocked, boolean allowDrops,
+            CraftRequest.PartialPolicy partialPolicy, int maxBatches, int inventoryMaximum,
+            List<ItemStack> inventory, List<Input> inputs) {
+        this(session, recipes, resources, workbench, limitedCrafting, unlocked, allowDrops, partialPolicy,
+                maxBatches, org.berusted.craftable.planner.SearchBudget.DEFAULT_MAX_STEPS, inventoryMaximum, inventory, inputs);
+    }
+
     public BrowsingSnapshot {
         java.util.Objects.requireNonNull(session);
         java.util.Objects.requireNonNull(partialPolicy);
+        java.util.Objects.requireNonNull(directPreparation);
+        org.berusted.craftable.planner.SearchBudget.requireStepLimit(maxPlanSteps);
         if (recipes < 0 || resources < 0 || maxBatches < 1 || maxBatches > CraftRequest.MAX_BATCHES
                 || inventoryMaximum < 1 || inventoryMaximum > 99 || inventory.size() != 36
                 || inputs.size() > MAX_INPUTS || unlocked.size() > MAX_UNLOCKED)
@@ -67,7 +91,7 @@ public record BrowsingSnapshot(UUID session, long recipes, long resources, boole
      * Server authorization also checks its private source bindings separately. */
     public Object contentIdentity() {
         return List.of(recipes, workbench, limitedCrafting, unlocked, allowDrops, partialPolicy,
-                maxBatches, inventoryMaximum, CraftPlan.stackKeys(inventory), inputs.stream()
+                maxBatches, maxPlanSteps, directPreparation, inventoryMaximum, CraftPlan.stackKeys(inventory), inputs.stream()
                         .map(input -> List.of(input.reference(), input.inventorySlot(),
                                 CraftPlan.stackKeys(List.of(input.stack())))).toList());
     }

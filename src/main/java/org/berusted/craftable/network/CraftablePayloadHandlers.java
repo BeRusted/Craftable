@@ -15,6 +15,19 @@ public final class CraftablePayloadHandlers {
     /** Acceptance counters: count the real network entries, not just solver calls. */
     public static long detailRequests() { return detailRequests; }
 
+    public static void handleSettingsRequest(SettingsPayloads.RulesRequest payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)
+                    || !CraftableRequestLimiter.allowSettings(player.getUUID(), System.nanoTime())) return;
+            // Reading effective config is cheap and grants no world/resource
+            // access, including when settings are opened in creative mode.
+            net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(player,
+                    new SettingsPayloads.RulesResponse(payload.revision(),
+                            org.berusted.craftable.config.CraftableServerConfig.scanSettings(),
+                            org.berusted.craftable.config.CraftableServerConfig.craftingRules()));
+        });
+    }
+
     public static void handleBrowse(CraftingDetailPayloads.BrowseRequest payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
@@ -99,7 +112,11 @@ public final class CraftablePayloadHandlers {
                 net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(player,
                         new CraftingDetailPayloads.BrowseLease(transfer.request.menuId(), transfer.request.revision(),
                                 snapshot.session(), snapshot.recipes(), snapshot.resources(), now + 10, fingerprint, header,
-                                org.berusted.craftable.config.CraftableServerConfig.scanSettings(), snapshot.workbench()));
+                                org.berusted.craftable.config.CraftableServerConfig.scanSettings(), snapshot.workbench(),
+                                new org.berusted.craftable.config.CraftableServerConfig.CraftingRules(snapshot.partialPolicy(),
+                                        snapshot.allowDrops() ? org.berusted.craftable.config.CraftableServerConfig.SurplusDelivery.DROP_OVERFLOW
+                                                : org.berusted.craftable.config.CraftableServerConfig.SurplusDelivery.REQUIRE_SPACE,
+                                        snapshot.maxBatches(), snapshot.maxPlanSteps())));
             } catch (RuntimeException failure) {
                 // Release all retained values on failed normalization/capture.
                 transfer.bytes = null; transfer.snapshot = null; transfer.retained = 0;

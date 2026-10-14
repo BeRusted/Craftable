@@ -25,6 +25,7 @@ import org.berusted.craftable.workstation.WorkstationCapability;
 /** Only server facade for planning and committing a chain; UI previews never authorize writes. */
 public final class CraftingService {
     private static final Set<UUID> ACTIVE = new HashSet<>();
+    private static final boolean WITNESS_TIMING_ENABLED = Boolean.getBoolean("craftable.witnessTiming");
     // Monotonic structural counters; no plans or per-request telemetry retained.
     static long activeFullSearches, activePartialSearches, witnessValidations;
     private CraftingService() {}
@@ -90,33 +91,48 @@ public final class CraftingService {
     // network/public entry points always keep the production admission cap.
     static Draft preview(ServerPlayer player, CraftRequest request, String choicePath,
             CraftPlan.Witness witness, long sequence, SearchBudget testBudget, LongSupplier remainingNanos) {
+        long timingStart = WITNESS_TIMING_ENABLED ? System.nanoTime() : 0;
         if (!validContext(player)) return new Draft(new UUID(0, 0),
                 org.berusted.craftable.planner.PlanView.failed(CraftingResultCode.INVALID_CONTEXT),
                 new org.berusted.craftable.planner.PlanView.Choices(List.of(), false));
         CraftingSessions.discardOffer(player);
         if (witness != null && (!CraftingSessions.acceptSequence(player, sequence)
-                || !CraftingSessions.acceptsWitness(player, witness))) return failedDraft(CraftingResultCode.ENVIRONMENT_CHANGED);
+                || !CraftingSessions.acceptsWitness(player, witness)))
+            return failedDraft(CraftingResultCode.ENVIRONMENT_CHANGED);
         try {
-            if (admissionExhausted(remainingNanos)) return failedDraft(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
+            if (admissionExhausted(remainingNanos))
+                return failedDraft(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
             var snapshot = EnvironmentSnapshotService.fresh(player);
+            long timingScan = WITNESS_TIMING_ENABLED ? System.nanoTime() : 0;
             var allowance = testBudget == null ? planningBudget(remainingNanos, System::nanoTime) : testBudget;
-            if (allowance == null) return failedDraft(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
+            if (allowance == null)
+                return failedDraft(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
             var prepared = witness == null ? prepare(player, request, snapshot, allowance)
                     : prepareWitness(player, request, snapshot, witness, allowance);
+            long timingPrepare = WITNESS_TIMING_ENABLED ? System.nanoTime() : 0;
             if (prepared.result().plan().isPresent() && exhausted(allowance, remainingNanos))
-                return failedDraft(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
+                return timedDraft(failedDraft(CraftingResultCode.SEARCH_BUDGET_EXCEEDED),
+                        "after-prepare", timingStart, timingScan, timingPrepare, 0, 0);
+            var available = new ArrayList<net.minecraft.world.item.ItemStack>();
+            for (var source : sources(snapshot)) {
+                var stack = source.stack();
+                if (!CraftingRecipes.protectedStack(stack)) available.add(stack);
+            }
             var view = org.berusted.craftable.planner.PlanView.from(prepared.recipes(), prepared.request(),
-                    prepared.result(), prepared.delivery().drops(), sources(snapshot).stream().map(ResourceLedger.Source::stack)
-                            .filter(s -> !CraftingRecipes.protectedStack(s)).toList());
+                    prepared.result(), prepared.delivery().drops(), available);
+            long timingView = WITNESS_TIMING_ENABLED ? System.nanoTime() : 0;
             var choices = view.choices(prepared.recipes(), prepared.request(), choicePath);
+            long timingChoices = WITNESS_TIMING_ENABLED ? System.nanoTime() : 0;
             if (prepared.result().plan().isPresent() && exhausted(allowance, remainingNanos))
-                return failedDraft(CraftingResultCode.SEARCH_BUDGET_EXCEEDED);
+                return timedDraft(failedDraft(CraftingResultCode.SEARCH_BUDGET_EXCEEDED),
+                        "after-view", timingStart, timingScan, timingPrepare, timingView, timingChoices);
             // An incomplete display must never authorize an undisclosed plan.
             UUID token = view.complete() && (!view.primary().isEmpty())
                     && (prepared.result().plan().filter(CraftPlan::partial).isEmpty()
                         || request.partial() && prepared.request().policy() != CraftRequest.PartialPolicy.NEVER)
                     ? CraftingSessions.offer(player, prepared, witness != null) : new UUID(0, 0);
-            return new Draft(token, view, choices);
+            return timedDraft(new Draft(token, view, choices), "return",
+                    timingStart, timingScan, timingPrepare, timingView, timingChoices);
         } catch (IllegalArgumentException rejected) {
             return failedDraft(CraftingResultCode.ENVIRONMENT_CHANGED);
         } catch (RuntimeException exception) {
@@ -222,6 +238,7 @@ public final class CraftingService {
                 }
             }
             if (!validContext(player) || !prepared.rules.equals(CraftableServerConfig.craftingRules())
+                    || plan.steps().size() > prepared.rules.maxPlanSteps()
                     || prepared.recipes.generation() != new CraftingRecipes(player, workbench(player, snapshot)).generation()) {
                 return Outcome.failed(CraftingResultCode.ENVIRONMENT_CHANGED);
             }
@@ -279,31 +296,48 @@ public final class CraftingService {
                 requested.allowDrops() && rules.surplusDelivery() == CraftableServerConfig.SurplusDelivery.DROP_OVERFLOW,
                 requested.policy().restrict(rules.partialPolicy()), requested.selections());
         if (effective.batches() > rules.maxBatches()) throw new IllegalArgumentException("Batch limit");
-        var recipes = new CraftingRecipes(player, workbench(player, world));
+        var recipes = new CraftingRecipes(player, workbench(player, world), rules.directPreparation());
         witnessValidations++;
         CraftPlan plan;
-        try { plan = CraftWitnessValidator.validate(recipes, effective, witness, browsing.sources(), budget); }
+        try { plan = CraftWitnessValidator.validate(recipes, effective, witness, browsing.sources(), budget, rules.maxPlanSteps()); }
         catch (IllegalArgumentException rejected) {
             if (budget.alive()) throw rejected;
             return new Prepared(SearchResult.blocked(CraftingResultCode.SEARCH_BUDGET_EXCEEDED), effective, recipes, rules,
                     MainInventoryInsertion.Delivery.failed(CraftingResultCode.SEARCH_BUDGET_EXCEEDED));
         }
         var bindings = CraftingSessions.witnessBindings(player, world);
-        var extractions = plan.extractions().stream().map(extraction -> {
+        var extractions = new ArrayList<CraftPlan.Extraction>(plan.extractions().size());
+        for (var extraction : plan.extractions()) {
             var source = bindings.get(extraction.endpointId());
-            if (source == null || !net.minecraft.world.item.ItemStack.matches(source.stack(), extraction.expected()))
+            if (source == null) throw new IllegalArgumentException("Changed witness source");
+            var expected = source.stack();
+            if (!net.minecraft.world.item.ItemStack.matches(expected, extraction.expected()))
                 throw new IllegalArgumentException("Changed witness source");
-            return new CraftPlan.Extraction(source.endpointId(), source.slot(), extraction.count(), source.stack());
-        }).toList();
+            extractions.add(new CraftPlan.Extraction(source.endpointId(), source.slot(), extraction.count(), expected));
+        }
         plan = new CraftPlan(plan.target(), plan.requestedBatches(), plan.completedBatches(), plan.steps(), extractions,
                 plan.primary(), plan.surplus(), plan.missing(), plan.safePartial());
         var delivery = MainInventoryInsertion.simulate(player.getInventory(), plan, world, effective.allowDrops());
         var result = delivery.failure() == null
                 ? new SearchResult(CraftingResultCode.CREATED, java.util.Optional.of(plan), List.of(), true, 0)
                 : SearchResult.blocked(delivery.failure());
-        if (!budget.alive()) return new Prepared(SearchResult.blocked(CraftingResultCode.SEARCH_BUDGET_EXCEEDED), effective, recipes, rules,
-                MainInventoryInsertion.Delivery.failed(CraftingResultCode.SEARCH_BUDGET_EXCEEDED));
+        if (!budget.alive()) {
+            return new Prepared(SearchResult.blocked(CraftingResultCode.SEARCH_BUDGET_EXCEEDED), effective, recipes, rules,
+                    MainInventoryInsertion.Delivery.failed(CraftingResultCode.SEARCH_BUDGET_EXCEEDED));
+        }
         return new Prepared(result, effective, recipes, rules, delivery);
+    }
+
+    /** Opt-in primitive-only cold-path timing. No observer object, supplier
+     * reads or initialization/preflight; output happens after the decision. */
+    private static Draft timedDraft(Draft draft, String checkpoint, long start, long scan,
+            long prepare, long view, long choices) {
+        if (WITNESS_TIMING_ENABLED) Craftable.LOGGER.warn(
+                "CRAFT_REVIEW_TIMING checkpoint={} code={} complete={} token={} scanNs={} prepareNs={} viewNs={} choicesNs={} totalNs={}",
+                checkpoint, draft.view().code(), draft.view().complete(), !draft.token().equals(new UUID(0, 0)),
+                scan - start, prepare - scan, view == 0 ? -1 : view - prepare,
+                choices == 0 ? -1 : choices - view, System.nanoTime() - start);
+        return draft;
     }
 
     private static Prepared prepare(ServerPlayer player, CraftRequest requested, EnvironmentSnapshot snapshot,
@@ -312,7 +346,7 @@ public final class CraftingService {
         CraftRequest effective = new CraftRequest(requested.recipe(), requested.batches(), requested.partial(),
                 requested.allowDrops() && rules.surplusDelivery() == CraftableServerConfig.SurplusDelivery.DROP_OVERFLOW,
                 requested.policy().restrict(rules.partialPolicy()), requested.selections());
-        var recipes = new CraftingRecipes(player, workbench(player, snapshot));
+        var recipes = new CraftingRecipes(player, workbench(player, snapshot), rules.directPreparation());
         if (effective.batches() > rules.maxBatches()) {
             return new Prepared(SearchResult.blocked(CraftingResultCode.SEARCH_BUDGET_EXCEEDED), effective,
                     recipes, rules, MainInventoryInsertion.Delivery.failed(CraftingResultCode.SEARCH_BUDGET_EXCEEDED));
@@ -338,7 +372,7 @@ public final class CraftingService {
                 CraftPlan.stackKeys(mainSlots), inventoryMaximum, playerEndpoints, endpointIds);
         var previous = CraftingSessions.failure(player, identity);
         var scope = previous == null ? new CraftSearch.Reachability() : previous.scope();
-        var search = new CraftSearch(recipes, diagnostic, sources, budget,
+        var search = new CraftSearch(recipes, diagnostic, sources, budget, rules.maxPlanSteps(),
                 plan -> MainInventoryInsertion.simulate(mainSlots, inventoryMaximum, plan, playerEndpoints, endpointIds, effective.allowDrops()).failure())
                 .withReachability(scope).withFullEvidence(previous == null ? null : previous.evidence());
         SearchResult result = search.run();
@@ -398,14 +432,14 @@ public final class CraftingService {
 
         private BatchPreview(ServerPlayer player, EnvironmentSnapshot snapshot, boolean allowDrops, CraftRequest.PartialPolicy policy) {
             this.player = player;
-            recipes = new CraftingRecipes(player, workbench(player, snapshot));
+            rules = CraftableServerConfig.craftingRules();
+            recipes = new CraftingRecipes(player, workbench(player, snapshot), rules.directPreparation());
             sources = sources(snapshot);
             mainSlots = MainInventoryInsertion.copyMainInventory(player.getInventory());
             inventoryMaximum = player.getInventory().getMaxStackSize();
             playerEndpoints = snapshot.endpoints().stream().filter(e -> e.kind() == org.berusted.craftable.environment.EndpointKind.PLAYER)
                     .map(e -> e.id()).collect(java.util.stream.Collectors.toUnmodifiableSet());
             endpointIds = snapshot.endpoints().stream().map(e -> e.id()).collect(java.util.stream.Collectors.toUnmodifiableSet());
-            rules = CraftableServerConfig.craftingRules();
             this.allowDrops = allowDrops && rules.surplusDelivery() == CraftableServerConfig.SurplusDelivery.DROP_OVERFLOW;
             this.policy = policy.restrict(rules.partialPolicy());
             Object identity = List.of(recipes.accessIdentity(), rules, this.allowDrops, this.policy, snapshot.dimension(), snapshot.origin(), snapshot.scanSettings(),
@@ -436,9 +470,8 @@ public final class CraftingService {
             return evaluate(id, budget, true);
         }
 
-        /** FULL_ONLY is internal until the snapshot protocol can represent its
-         * lower precision. Do not publish a full-negative as a three-state
-         * BLOCKED diagnosis on the legacy recipe-book wire. */
+        /** Full-only failures have lower diagnostic precision. This retained
+         * test/command facade is not the live browsing network entry. */
         public Verdict evaluate(ResourceLocation id, SearchBudget budget, boolean diagnostics) {
             if (!validContext(player)) return new Verdict(org.berusted.craftable.api.CraftingStatus.BLOCKED, CraftingResultCode.INVALID_CONTEXT);
             if (recipes.find(id) == null) return new Verdict(org.berusted.craftable.api.CraftingStatus.BLOCKED, CraftingResultCode.UNSUPPORTED_RECIPE);
@@ -455,7 +488,7 @@ public final class CraftingService {
                 return cached.verdict();
             }
             var request = new CraftRequest(id, 1, diagnostics, allowDrops, policy, java.util.Map.of());
-            var search = new CraftSearch(recipes, request, sources, budget,
+            var search = new CraftSearch(recipes, request, sources, budget, rules.maxPlanSteps(),
                     plan -> MainInventoryInsertion.simulate(mainSlots, inventoryMaximum, plan,
                             playerEndpoints, endpointIds, request.allowDrops()).failure())
                     .withReachability(cache.reachability)
@@ -507,8 +540,8 @@ public final class CraftingService {
     static Maximum maximum(ServerPlayer player, CraftRequest requested, SearchBudget allowance) {
         if (!validContext(player)) return new Maximum(0, false, 0, true, false);
         var snapshot = EnvironmentSnapshotService.fresh(player);
-        var catalog = new CraftingRecipes(player, workbench(player, snapshot));
         var rules = CraftableServerConfig.craftingRules();
+        var catalog = new CraftingRecipes(player, workbench(player, snapshot), rules.directPreparation());
         // Capacity is not monotone: consuming a larger input stack can free a
         // slot. Prove each bounded count instead of binary-searching a predicate
         // that can be false/true/false. Across requests keep only verdicts plus

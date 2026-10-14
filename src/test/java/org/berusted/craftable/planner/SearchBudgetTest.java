@@ -5,6 +5,35 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SearchBudgetTest {
+    @Test void stepLimitsDoNotChangeTimeStateOrBranchAllowances() {
+        assertEquals(128, SearchBudget.DEFAULT_MAX_STEPS);
+        assertEquals(256, SearchBudget.HARD_MAX_STEPS);
+        for (int limit : new int[] {1, 128, 256}) assertEquals(limit, SearchBudget.requireStepLimit(limit));
+        for (int limit : new int[] {Integer.MIN_VALUE, 0, 257, Integer.MAX_VALUE})
+            assertThrows(IllegalArgumentException.class, () -> SearchBudget.requireStepLimit(limit));
+        assertEquals(12, SearchBudget.MAX_DEPTH);
+        assertEquals(2048, SearchBudget.MAX_STATES);
+        assertEquals(16, SearchBudget.MAX_CANDIDATES);
+        assertEquals(128, SearchBudget.MAX_FRONTIER);
+        assertEquals(32, SearchBudget.MAX_MAXIMUM_SLICES);
+        var clock = new AtomicLong();
+        var budget = SearchBudget.resumable(clock::get, 100, 2);
+        budget.beginSlice(20);
+        assertTrue(budget.enter());
+        clock.set(20);
+        budget.endSlice();
+        SearchBudget.requireStepLimit(256);
+        assertEquals(80, budget.remainingNanos());
+        assertEquals(1, budget.states());
+        clock.set(1_000_000);
+        budget.beginSlice(100);
+        assertTrue(budget.enter());
+        assertFalse(budget.enter());
+        budget.endSlice();
+        assertEquals(2, budget.states());
+        assertTrue(budget.exhausted());
+    }
+
     @Test void omittedBranchDoesNotExhaustTheRetainedContinuation() {
         var clock = new AtomicLong();
         var budget = SearchBudget.resumable(clock::get, 100, 10);

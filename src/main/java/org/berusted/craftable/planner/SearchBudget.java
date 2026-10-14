@@ -4,7 +4,9 @@ import java.util.function.LongSupplier;
 
 /** Cooperative limits: an individual Minecraft recipe call cannot be preempted. */
 public final class SearchBudget {
-    public static final int MAX_STEPS = 128;
+    public static final int DEFAULT_MAX_STEPS = 128;
+    /** Fixed representation bound, not a mutable world rule or extra CPU allowance. */
+    public static final int HARD_MAX_STEPS = 256;
     public static final int MAX_DEPTH = 12;
     public static final int MAX_STATES = 2048;
     public static final int MAX_CANDIDATES = 16;
@@ -31,6 +33,14 @@ public final class SearchBudget {
         this.clock = clock;
         this.deadline = clock.getAsLong() + nanos;
         this.maximumStates = maximumStates;
+    }
+
+    /** Validate a world-owned limit before allocating a search or replay state.
+     * The caller freezes the returned value for the entire operation. */
+    public static int requireStepLimit(int maxPlanSteps) {
+        if (maxPlanSteps < 1 || maxPlanSteps > HARD_MAX_STEPS)
+            throw new IllegalArgumentException("Invalid plan step limit");
+        return maxPlanSteps;
     }
 
     public boolean enter() {

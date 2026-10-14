@@ -55,6 +55,8 @@ public final class M4ClientSmoke {
     private static final M4OutputVariantScenario outputVariants = new M4OutputVariantScenario();
     private static final M4DetailQuantityScenario detailQuantity = new M4DetailQuantityScenario();
     private static final M4BulkQuantityScenario bulkQuantity = new M4BulkQuantityScenario();
+    private static final PreM5MaximumProjectionScenario maximumProjection = new PreM5MaximumProjectionScenario();
+    private static final PreM5SettingsScenario settings = new PreM5SettingsScenario();
     private static long serverDetails;
     private static long witnessBefore, fullSearchesBefore;
     private static int reviewMismatchPhase;
@@ -154,6 +156,11 @@ public final class M4ClientSmoke {
                 });
                 next();
             } else if (stage == 1 && configured && age > 60) {
+                if (Boolean.getBoolean("craftable.preM5Only")) {
+                    stage = 31; age = 0;
+                    Craftable.LOGGER.warn("PRE_M5_ONLY: filtered client harness; this run is not complete M4/planning evidence");
+                    return;
+                }
                 if (!org.berusted.craftable.recipe.M48ClientKnowledgeProbe.sliced(mc)) return;
                 org.berusted.craftable.recipe.M48ClientKnowledgeProbe.measure(mc);
                 mc.player.getRecipeBook().setOpen(RecipeBookType.CRAFTING, true);
@@ -261,8 +268,16 @@ public final class M4ClientSmoke {
                 next();
             } else if (stage == 7 && ready()) {
                 var create = (Button) field(overlay(), "create");
-                require(create.active, "Full confirm disabled");
+                // Diagnostic only: preserve the original readiness gate and
+                // assertion, but distinguish a terminal preview from an
+                // expired lease and from a failed authoritative review.
+                var state = fullConfirmState();
+                Craftable.LOGGER.warn("M4_STAGE7_STATE {}", state);
+                require(create.active, "Full confirm disabled; " + state);
                 if (reviewMismatchPhase == 0) {
+                    // Runs only after the unchanged natural confirmation assertion.
+                    // Its injected lease is restored before the real review click.
+                    if (Boolean.getBoolean("craftable.stage7ConfirmAudit")) Stage7ConfirmDiagnosticScenario.verify();
                     witnessBefore = executionCounter("witnessValidations");
                     fullSearchesBefore = executionCounter("activeFullSearches");
                     // Simulate a stale/mismatching client review, not changed
@@ -543,7 +558,13 @@ public final class M4ClientSmoke {
             } else if (stage == 29 && detailQuantity.tick(mc)) {
                 next();
             } else if (stage == 30 && bulkQuantity.tick(mc)) {
-                Craftable.LOGGER.warn("M4_SMOKE PASS: real Shift+C, candidates/pin, mixed MAX/slider/cost review, full/partial, GUI scales 1/2/3, zh/en, detail latency, menu/mode isolation, bulk64logs/MAX/drag/witness commit");
+                next();
+            } else if (stage == 31 && maximumProjection.tick(mc)) {
+                next();
+            } else if (stage == 32 && settings.tick(mc)) {
+                if (Boolean.getBoolean("craftable.preM5Only"))
+                    Craftable.LOGGER.warn("M4_SMOKE PASS: FILTERED Pre-M5 deferred MAX and native settings only; not full planning regression");
+                else Craftable.LOGGER.warn("M4_SMOKE PASS: real Shift+C, candidates/pin, mixed MAX/slider/cost review, full/partial, GUI scales 1/2/3, zh/en, detail latency, menu/mode isolation, bulk64logs/MAX/drag/witness commit, Pre-M5 deferred MAX and native settings");
                 stage = -1;
                 restoreOptions();
                 mc.stop();
@@ -581,6 +602,58 @@ public final class M4ClientSmoke {
         if (overlay() == null || field(overlay(), "pending") != null || (boolean) field(overlay(), "dirty") || draft() == null) return false;
         var maximum = (CraftingService.Maximum) field(overlay(), "maximum");
         return maximum != null && !maximum.pending();
+    }
+    private static String fullConfirmState() throws Exception {
+        var mc = Minecraft.getInstance();
+        var self = overlay(); var currentDraft = draft();
+        var request = (CraftRequest) field(self, "intent");
+        var planner = org.berusted.craftable.client.recipebook.ClientBrowsePlanner.class;
+        var grant = (org.berusted.craftable.network.CraftingDetailPayloads.BrowseLease) staticField(planner, "grant");
+        var snapshot = (org.berusted.craftable.environment.BrowsingSnapshot) staticField(planner, "snapshot");
+        var input = (org.berusted.craftable.recipe.PlanningInput) staticField(planner, "input");
+        var effective = new CraftRequest(request.recipe(), request.batches(), request.partial(),
+                request.allowDrops() && (boolean) staticField(planner, "drops"),
+                request.policy().restrict((CraftRequest.PartialPolicy) staticField(planner, "policy")), request.selections());
+        boolean plannerReady = org.berusted.craftable.client.recipebook.ClientBrowsePlanner.ready();
+        boolean uiReady = !(boolean) field(self, "dirty") && !(boolean) field(self, "queuedAction")
+                && (field(self, "pending") == null || field(self, "pending").toString().equals("MAXIMUM"))
+                && !field(self, "pane").toString().equals("CHOICES");
+        boolean expectedActive = uiReady && ((boolean) field(self, "localDraft") && plannerReady
+                || !currentDraft.token().equals(org.berusted.craftable.network.CraftingDetailPayloads.NO_TOKEN))
+                && (currentDraft.view().code() == CraftingResultCode.CREATED
+                    || request.partial() && request.policy() != CraftRequest.PartialPolicy.NEVER
+                        && currentDraft.view().code() == CraftingResultCode.PARTIAL_CREATED);
+        return "phase=" + reviewMismatchPhase + ",age=" + age + ",create=" + ((Button) field(self, "create")).active
+                + ",expectedCreate=" + expectedActive
+                + ",code=" + currentDraft.view().code() + ",complete=" + currentDraft.view().complete()
+                + ",local=" + field(self, "localDraft")
+                + ",serverToken=" + !currentDraft.token().equals(org.berusted.craftable.network.CraftingDetailPayloads.NO_TOKEN)
+                + ",intent=" + request + ",pane=" + field(self, "pane") + ",dirty=" + field(self, "dirty")
+                + ",pending=" + field(self, "pending") + ",queued=" + field(self, "queuedAction")
+                + ",generation=" + field(self, "generation") + "/" + field(self, "sentGeneration")
+                + ",maximum=" + field(self, "maximum")
+                + ",plannerReady=" + plannerReady
+                + ",sentAgeMs=" + (System.nanoTime() - (long) field(self, "sentAt")) / 1_000_000.0
+                + ",scope=" + field(self, "resourceScope") + "/"
+                    + org.berusted.craftable.client.recipebook.ClientBrowsePlanner.scopeVersion()
+                + ",displayedWitness=" + (field(self, "displayedWitness") != null)
+                + ",submittedWitness=" + (field(self, "submittedWitness") != null)
+                + ",reviewWitnessValidations=" + (reviewMismatchPhase == 1 ? executionCounter("witnessValidations") - witnessBefore : -1)
+                + ",reviewFullSearches=" + (reviewMismatchPhase == 1 ? executionCounter("activeFullSearches") - fullSearchesBefore : -1)
+                + ",time=" + mc.level.getGameTime() + ",leaseExpires=" + (grant == null ? "none" : grant.expires())
+                + ",grant=" + (grant == null ? "none" : List.of(grant.session(), grant.resources(), grant.recipes(), grant.rules()))
+                + ",snapshot=" + (snapshot == null ? "none" : List.of(snapshot.session(), snapshot.resources(), snapshot.recipes(),
+                    snapshot.maxPlanSteps(), snapshot.maxBatches(), snapshot.partialPolicy(), snapshot.allowDrops()))
+                + ",fingerprintMatch=" + (grant != null && input != null && input.fingerprint().equals(grant.fingerprint()))
+                + ",effective=" + effective
+                + ",fullReason=" + org.berusted.craftable.client.recipebook.ClientRecipeStatusStore.reason(effective)
+                + ",fullExhausted=" + org.berusted.craftable.client.recipebook.ClientRecipeStatusStore.exhausted(effective)
+                + ",diagnosticReason=" + org.berusted.craftable.client.recipebook.ClientRecipeStatusStore.diagnosticReason(effective)
+                + ",diagnosticExhausted=" + org.berusted.craftable.client.recipebook.ClientRecipeStatusStore.diagnosticExhausted(effective)
+                + ",retainedRequest=" + staticField(planner, "retainedRequest");
+    }
+    private static Object staticField(Class<?> type, String name) throws Exception {
+        var member = type.getDeclaredField(name); member.setAccessible(true); return member.get(null);
     }
     private static void cancelQueuedMaximum(Minecraft mc) throws Exception {
         var create = (Button) field(overlay(), "create");

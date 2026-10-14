@@ -22,11 +22,14 @@ class CraftingDetailPayloadTest {
             buffer.clear();
             var header = new CraftingWire.SnapshotHeader(session, transfer, 2, 3, 3, 1, CraftingWire.sha256().digest(new byte[]{1,2,3}));
             var lease = new CraftingDetailPayloads.BrowseLease(1, 9, session, 2, 3, 100, "a".repeat(64), header,
-                    new org.berusted.craftable.config.EnvironmentScanSettings(8, 4, 10, true), true);
+                    new org.berusted.craftable.config.EnvironmentScanSettings(8, 4, 10, true), true,
+                    new org.berusted.craftable.config.CraftableServerConfig.CraftingRules(CraftRequest.PartialPolicy.NEVER,
+                            org.berusted.craftable.config.CraftableServerConfig.SurplusDelivery.REQUIRE_SPACE, 64, 256));
             CraftingDetailPayloads.BrowseLease.CODEC.encode(buffer, lease);
             assertTrue(buffer.readableBytes() < 1024);
             var decoded = CraftingDetailPayloads.BrowseLease.CODEC.decode(buffer);
             assertEquals(lease.session(), decoded.session()); assertEquals(lease.settings(), decoded.settings());
+            assertEquals(lease.rules(), decoded.rules());
             assertArrayEquals(header.digest(), decoded.header().digest());
             buffer.clear();
             var chunk = new CraftingDetailPayloads.BrowseChunk(1, 9, session, transfer, 0, new byte[]{1,2,3});

@@ -58,7 +58,7 @@ public final class CraftingWire {
         int length = count(outer, MAX_DETAIL_BYTES);
         var body = new RegistryFriendlyByteBuf(outer.readSlice(length), outer.registryAccess());
         var session = body.readUUID(); long recipes = body.readVarLong(), resources = body.readVarLong();
-        int size = count(body, org.berusted.craftable.planner.SearchBudget.MAX_STEPS);
+        int size = count(body, org.berusted.craftable.planner.SearchBudget.HARD_MAX_STEPS);
         var steps = new ArrayList<CraftPlan.WitnessStep>(size);
         for (int i = 0; i < size; i++) {
             var recipe = net.minecraft.resources.ResourceLocation.parse(body.readUtf(512));
@@ -215,6 +215,8 @@ public final class CraftingWire {
             buffer.writeBoolean(value.allowDrops());
             buffer.writeEnum(value.partialPolicy());
             buffer.writeVarInt(value.maxBatches());
+            buffer.writeVarInt(value.maxPlanSteps());
+            SettingsPayloads.writeDirectPreparation(buffer, value.directPreparation());
             buffer.writeVarInt(value.inventoryMaximum());
             for (var stack : value.inventory()) ItemStack.OPTIONAL_STREAM_CODEC.encode(buffer, stack);
             buffer.writeVarInt(value.inputs().size());
@@ -249,7 +251,8 @@ public final class CraftingWire {
         private long recipes, resources;
         private boolean workbench, limited, drops, closed;
         private CraftRequest.PartialPolicy policy;
-        private int phase, unlockCount, sourceCount, batches, maximum;
+        private org.berusted.craftable.config.DirectPreparationPolicy directPreparation;
+        private int phase, unlockCount, sourceCount, batches, steps, maximum;
         private org.berusted.craftable.environment.BrowsingSnapshot result;
 
         public SnapshotDecoder(byte[] data, net.minecraft.core.RegistryAccess registries) {
@@ -279,7 +282,10 @@ public final class CraftingWire {
                         }
                         case 2 -> {
                             drops = buffer.readBoolean(); policy = buffer.readEnum(CraftRequest.PartialPolicy.class);
-                            batches = count(buffer, CraftRequest.MAX_BATCHES); maximum = count(buffer, 99); phase = 3;
+                            batches = count(buffer, CraftRequest.MAX_BATCHES);
+                            steps = org.berusted.craftable.planner.SearchBudget.requireStepLimit(buffer.readVarInt());
+                            directPreparation = SettingsPayloads.readDirectPreparation(buffer);
+                            maximum = count(buffer, 99); phase = 3;
                         }
                         case 3 -> {
                             if (inventory.size() < 36) inventory.add(ItemStack.OPTIONAL_STREAM_CODEC.decode(buffer));
@@ -291,7 +297,7 @@ public final class CraftingWire {
                             else {
                                 if (buffer.isReadable()) throw new IllegalArgumentException("Trailing snapshot bytes");
                                 result = new org.berusted.craftable.environment.BrowsingSnapshot(session, recipes, resources,
-                                        workbench, limited, unlocked, drops, policy, batches, maximum, inventory, inputs);
+                                        workbench, limited, unlocked, drops, policy, batches, steps, directPreparation, maximum, inventory, inputs);
                                 close(); return true;
                             }
                         }
@@ -420,7 +426,7 @@ public final class CraftingWire {
             for (int j = 0; j < recipes; j++) ids.add(buffer.readResourceLocation());
             nodes.add(new PlanView.Node(path, needs, made, ids, buffer.readBoolean(), buffer.readBoolean(), buffer.readUtf(32)));
         }
-        size = count(buffer, org.berusted.craftable.planner.SearchBudget.MAX_STEPS);
+        size = count(buffer, org.berusted.craftable.planner.SearchBudget.HARD_MAX_STEPS);
         var operations = new ArrayList<PlanView.Operation>(size);
         for (int i = 0; i < size; i++) {
             var recipe = buffer.readResourceLocation();

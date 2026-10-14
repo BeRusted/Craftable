@@ -134,8 +134,8 @@ final class M4GraphPresentationScenario {
         var contents = (net.minecraft.network.chat.contents.TranslatableContents) summary.getContents();
         require(contents.getKey().equals("tooltip.craftable.rules"), "World settings unavailable in active fixture");
         var arguments = contents.getArgs();
-        require(arguments.length == 4 && arguments[3] instanceof Component, "Ender chest setting still uses a raw boolean");
-        var enabled = ((Component) arguments[3]).getString();
+        require(arguments.length == 3 && arguments[2] instanceof Component, "Ender chest setting still uses a raw boolean or diagnostic TTL leaked into gameplay rules");
+        var enabled = ((Component) arguments[2]).getString();
         require(enabled.equals(Component.translatable("options.on").getString())
                 || enabled.equals(Component.translatable("options.off").getString()), "Ender chest setting lost vanilla On/Off");
         System.out.println("M4_PLAYER_WORDING PASS language=" + language + " headings/localizedRules");

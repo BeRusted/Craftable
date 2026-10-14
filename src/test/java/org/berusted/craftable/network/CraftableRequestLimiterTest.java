@@ -9,6 +9,17 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 class CraftableRequestLimiterTest {
+    @org.junit.jupiter.api.Test void settingsRetryUsesMonotonicTimeEvenWhenTheWorldIsPaused() {
+        var player = java.util.UUID.randomUUID();
+        try {
+            org.junit.jupiter.api.Assertions.assertTrue(CraftableRequestLimiter.allowSettings(player, 1_000_000_000L));
+            org.junit.jupiter.api.Assertions.assertFalse(CraftableRequestLimiter.allowSettings(player, 1_050_000_000L));
+            org.junit.jupiter.api.Assertions.assertTrue(CraftableRequestLimiter.allowSettings(player, 1_100_000_000L));
+            // A settings read neither spends nor replenishes the gameplay request limiter.
+            org.junit.jupiter.api.Assertions.assertTrue(CraftableRequestLimiter.allowCreate(player, 100));
+            org.junit.jupiter.api.Assertions.assertFalse(CraftableRequestLimiter.allowCreate(player, 100));
+        } finally { CraftableRequestLimiter.clear(player); }
+    }
     @Test
     void activeRequestsBorrowOnlyTheSharedTicksRemainingTime() {
         var clock = new AtomicLong();

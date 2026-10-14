@@ -11,6 +11,9 @@ import org.berusted.craftable.config.CraftableClientConfig;
 final class ClientPayloadHandler {
     private static long lastCreateResponseRequestId = Long.MIN_VALUE;
     private ClientPayloadHandler() {}
+    public static void handle(SettingsPayloads.RulesResponse payload) {
+        org.berusted.craftable.client.CraftableSettingsScreen.receiveRules(payload.revision(), payload.scan(), payload.crafting());
+    }
     public static void handle(CraftingDetailPayloads.BrowseLease payload) {
         org.berusted.craftable.client.recipebook.ClientBrowsePlanner.receive(payload);
     }

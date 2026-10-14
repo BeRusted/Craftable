@@ -7,6 +7,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.berusted.craftable.api.CraftingResultCode;
 import org.berusted.craftable.planner.CraftPlan;
+import org.berusted.craftable.config.DirectPreparationPolicy;
 
 /** Value-oriented access to one generation's ordinary recipe knowledge. Search
  * operations do not read players, Level, containers or crafting hooks.
@@ -16,12 +17,19 @@ public final class PlanningInput {
     private final CraftingRecipes.Index index;
     private final boolean workbench, limited;
     private final Set<ResourceLocation> unlocked;
+    private final DirectPreparationPolicy directPreparation;
 
     PlanningInput(CraftingRecipes.Index index, boolean workbench, boolean limited, Set<ResourceLocation> unlocked) {
+        this(index, workbench, limited, unlocked, DirectPreparationPolicy.DEFAULT);
+    }
+
+    PlanningInput(CraftingRecipes.Index index, boolean workbench, boolean limited, Set<ResourceLocation> unlocked,
+            DirectPreparationPolicy directPreparation) {
         this.index = index;
         this.workbench = workbench;
         this.limited = limited;
         this.unlocked = Set.copyOf(unlocked);
+        this.directPreparation = java.util.Objects.requireNonNull(directPreparation, "directPreparation");
     }
 
     /** Connection-scoped static knowledge, independent of open menus and
@@ -74,8 +82,13 @@ public final class PlanningInput {
         }
 
         public PlanningInput bind(boolean workbench, boolean limited, Set<ResourceLocation> unlocked) {
+            return bind(workbench, limited, unlocked, DirectPreparationPolicy.DEFAULT);
+        }
+
+        public PlanningInput bind(boolean workbench, boolean limited, Set<ResourceLocation> unlocked,
+                DirectPreparationPolicy directPreparation) {
             if (state != State.READY) throw new IllegalStateException("Catalog is not ready");
-            return new PlanningInput(index, workbench, limited, unlocked);
+            return new PlanningInput(index, workbench, limited, unlocked, directPreparation);
         }
 
         public State state() { return state; }
@@ -103,6 +116,9 @@ public final class PlanningInput {
     public String fingerprint() { return index.planningFingerprint; }
     public boolean fullySupported() { return index.valueRecipes.size() == index.ordered.size(); }
     public boolean workbench() { return workbench; }
+    public boolean allowDirectPreparation(CraftingRecipes.Entry entry) {
+        return entry != null && directPreparation.allowsWithoutConfirmation(entry.id(), entry.safePreparation());
+    }
 
     /** Conservative scheduling hint only. A bucket returned by another input
      * must not be moved before the operation that can return it. Unknown

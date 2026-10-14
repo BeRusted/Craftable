@@ -11,6 +11,7 @@ final class CraftableRequestLimiter {
     private static final Map<UUID, Long> LAST_CREATE_REQUEST = new HashMap<>();
     private static final Map<UUID, Long> LAST_OPEN_REQUEST = new HashMap<>();
     private static final Map<UUID, Long> LAST_DETAIL_REQUEST = new HashMap<>();
+    private static final Map<UUID, Long> LAST_SETTINGS_REQUEST = new HashMap<>();
     private static final Map<net.minecraft.server.MinecraftServer, Frame> FRAMES = new java.util.WeakHashMap<>();
 
     // Background preview/MAX may use at most half the shared tick allowance.
@@ -92,11 +93,18 @@ final class CraftableRequestLimiter {
         return allow(LAST_DETAIL_REQUEST, playerId, gameTime, 4);
     }
 
+    static boolean allowSettings(UUID playerId, long monotonicNanos) {
+        // Options pause a singleplayer world's game clock. Read-only settings
+        // retries must still work there; this limiter has no crafting meaning.
+        return allow(LAST_SETTINGS_REQUEST, playerId, monotonicNanos, 100_000_000L);
+    }
+
     static void clear(UUID playerId) {
         LAST_OPEN_REQUEST.remove(playerId);
         LAST_STATUS_REQUEST.remove(playerId);
         LAST_CREATE_REQUEST.remove(playerId);
         LAST_DETAIL_REQUEST.remove(playerId);
+        LAST_SETTINGS_REQUEST.remove(playerId);
         FRAMES.values().forEach(frame -> frame.turns.remove(playerId));
     }
 

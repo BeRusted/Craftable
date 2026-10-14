@@ -4,6 +4,7 @@
   "package": "org.berusted.craftable.client.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "OptionsListEntryAccessor",
     "RecipeBookComponentAccessor",
     "RecipeBookPageAccessor",
     "RecipeButtonMixin",

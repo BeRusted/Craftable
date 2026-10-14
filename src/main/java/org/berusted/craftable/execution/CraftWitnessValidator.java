@@ -20,6 +20,15 @@ final class CraftWitnessValidator {
 
     static CraftPlan validate(CraftingRecipes recipes, CraftRequest request, CraftPlan.Witness witness,
             List<ResourceLedger.Source> sources, SearchBudget budget) {
+        return validate(recipes, request, witness, sources, budget, SearchBudget.DEFAULT_MAX_STEPS);
+    }
+
+    static CraftPlan validate(CraftingRecipes recipes, CraftRequest request, CraftPlan.Witness witness,
+            List<ResourceLedger.Source> sources, SearchBudget budget, int maxPlanSteps) {
+        // The codec's fixed ceiling limits parsing, not authority. Reject the
+        // current world's smaller limit before allocating the replay ledger.
+        SearchBudget.requireStepLimit(maxPlanSteps);
+        require(witness.steps().size() <= maxPlanSteps);
         require(!request.partial());
         var ledger = new ResourceLedger(sources);
         var supported = recipes.planningInput();
@@ -29,6 +38,7 @@ final class CraftWitnessValidator {
         boolean[] contributes = new boolean[usedOutputs.length];
         boolean[] anchored = new boolean[usedOutputs.length];
         int roots = 0;
+        boolean safePartial = true;
         for (var claimed : witness.steps()) {
             require(budget.alive());
             var entry = recipes.find(claimed.recipe());
@@ -68,14 +78,21 @@ final class CraftWitnessValidator {
                     usedOutputs[origin]++;
                 }
             }
-            var actual = recipes.assemble(entry, claimed.path(), grid);
+            var actual = recipes.assemble(entry, claimed.path(), grid, claimed.origins());
             require(actual != null && budget.alive());
             int index = steps.size();
-            steps.add(new CraftPlan.Step(actual.recipe(), actual.path(), actual.gridSize(), grid,
-                    actual.output(), actual.remainders(), claimed.origins()));
-            recipesByPath.computeIfAbsent(claimed.path(), ignored -> new HashMap<>()).putIfAbsent(entry.id(), entry);
-            ledger.produce(actual.output(), root, false, actual.path(), index);
-            for (var remainder : actual.remainders()) ledger.produce(remainder, false, true, actual.path(), index);
+            steps.add(actual);
+            var pathRecipes = recipesByPath.get(claimed.path());
+            if (pathRecipes == null) {
+                pathRecipes = new HashMap<>();
+                recipesByPath.put(claimed.path(), pathRecipes);
+            }
+            pathRecipes.putIfAbsent(entry.id(), entry);
+            var output = actual.output();
+            var remainders = actual.remainders();
+            ledger.produce(output, root, false, actual.path(), index);
+            for (var remainder : remainders) ledger.produce(remainder, false, true, actual.path(), index);
+            safePartial &= recipes.allowDirectPreparation(entry);
             contributes[index] = root;
         }
         require(roots == request.batches());
@@ -109,8 +126,7 @@ final class CraftWitnessValidator {
         }
         validateIntermediateOutputs(steps, usedOutputs, budget);
         var plan = new CraftPlan(request.recipe(), request.batches(), roots, steps, ledger.extractions(),
-                ledger.delivery(true), ledger.delivery(false), List.of(),
-                steps.stream().allMatch(step -> recipes.find(step.recipe().id()).safePreparation()));
+                ledger.delivery(true), ledger.delivery(false), List.of(), safePartial);
         require(plan.hasMaterialChange());
         return plan;
     }
@@ -124,7 +140,11 @@ final class CraftWitnessValidator {
             require(budget.alive());
             if (step.path().equals("0")) continue;
             var output = step.output();
-            var groups = groupsByItem.computeIfAbsent(output.getItem(), ignored -> new ArrayList<>());
+            var groups = groupsByItem.get(output.getItem());
+            if (groups == null) {
+                groups = new ArrayList<>();
+                groupsByItem.put(output.getItem(), groups);
+            }
             OutputGroup group = null;
             for (var candidate : groups) {
                 require(budget.alive());

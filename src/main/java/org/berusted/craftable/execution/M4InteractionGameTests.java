@@ -111,7 +111,7 @@ public final class M4InteractionGameTests {
                     new org.berusted.craftable.planner.CraftPlan.Witness(witness.session(), witness.recipes(), witness.resources(), unknown),
                     snapshot.sources(), new SearchBudget(1_000_000_000L)));
             rejected(helper, () -> new org.berusted.craftable.planner.CraftPlan.Witness(witness.session(), witness.recipes(), witness.resources(),
-                    java.util.Collections.nCopies(129, planks)));
+                    java.util.Collections.nCopies(SearchBudget.HARD_MAX_STEPS + 1, planks)));
             var clock = new java.util.concurrent.atomic.AtomicLong();
             var exhausted = CraftingService.prepareWitness(player, request, EnvironmentSnapshotService.fresh(player), witness,
                     new SearchBudget(clock::getAndIncrement, 1, 2048));

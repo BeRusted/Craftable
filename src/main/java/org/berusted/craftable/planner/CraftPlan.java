@@ -12,7 +12,7 @@ public record CraftPlan(ResourceLocation target, int requestedBatches, int compl
         List<ItemStack> surplus, List<Missing> missing, boolean safePartial) {
     public CraftPlan {
         if (requestedBatches < 1 || completedBatches < 0 || completedBatches > requestedBatches
-                || steps.isEmpty() || steps.size() > SearchBudget.MAX_STEPS) {
+                || steps.isEmpty() || steps.size() > SearchBudget.HARD_MAX_STEPS) {
             throw new IllegalArgumentException("Invalid chain");
         }
         steps = List.copyOf(steps);
@@ -48,7 +48,7 @@ public record CraftPlan(ResourceLocation target, int requestedBatches, int compl
     public record Witness(java.util.UUID session, long recipes, long resources, List<WitnessStep> steps) {
         public Witness {
             java.util.Objects.requireNonNull(session);
-            if (recipes < 0 || resources < 0 || steps.isEmpty() || steps.size() > SearchBudget.MAX_STEPS)
+            if (recipes < 0 || resources < 0 || steps.isEmpty() || steps.size() > SearchBudget.HARD_MAX_STEPS)
                 throw new IllegalArgumentException("Invalid witness size/version");
             steps = List.copyOf(steps);
             for (int i = 0; i < steps.size(); i++) for (int origin : steps.get(i).origins())
@@ -56,7 +56,8 @@ public record CraftPlan(ResourceLocation target, int requestedBatches, int compl
         }
 
         public static Witness from(CraftPlan plan, org.berusted.craftable.environment.BrowsingSnapshot snapshot) {
-            if (plan.partial()) throw new IllegalArgumentException("Partial witness");
+            if (plan.partial() || plan.steps().size() > snapshot.maxPlanSteps())
+                throw new IllegalArgumentException("Partial or step-limited witness");
             var ledger = new ResourceLedger(snapshot.sources());
             var steps = new java.util.ArrayList<WitnessStep>();
             for (var step : plan.steps()) {

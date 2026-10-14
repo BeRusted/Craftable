@@ -6,12 +6,16 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
  * Owns the protocol version and all Craftable payload registrations.
  */
 public final class CraftablePayloads {
-    public static final String PROTOCOL_VERSION = "9";
+    public static final String PROTOCOL_VERSION = "11";
 
     private CraftablePayloads() {}
 
     public static void register(RegisterPayloadHandlersEvent event) {
         var registrar = event.registrar(PROTOCOL_VERSION);
+        registrar.playToServer(SettingsPayloads.RulesRequest.TYPE, SettingsPayloads.RulesRequest.CODEC,
+                CraftablePayloadHandlers::handleSettingsRequest);
+        registrar.playToClient(SettingsPayloads.RulesResponse.TYPE, SettingsPayloads.RulesResponse.CODEC,
+                (p, c) -> c.enqueueWork(() -> ClientPayloadHandler.handle(p)));
         registrar.playToServer(CraftingDetailPayloads.BrowseRequest.TYPE, CraftingDetailPayloads.BrowseRequest.CODEC,
                 CraftablePayloadHandlers::handleBrowse);
         registrar.playToClient(CraftingDetailPayloads.BrowseLease.TYPE, CraftingDetailPayloads.BrowseLease.CODEC,

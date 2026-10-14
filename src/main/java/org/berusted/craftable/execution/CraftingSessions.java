@@ -26,7 +26,7 @@ public final class CraftingSessions {
     public static void clear(UUID player) { STATES.remove(player); }
     static void discardOffer(ServerPlayer player) { state(player).confirmation = null; }
 
-    /** Read-only projection for the future snapshot protocol. Its caller must
+    /** Read-only projection for the browsing snapshot protocol. Its caller must
      * hold the normal server admission lease; no capture is scheduled here. */
     public static org.berusted.craftable.environment.BrowsingSnapshot refreshBrowsing(ServerPlayer player) {
         if (!CraftingService.validContext(player)) {
@@ -152,7 +152,7 @@ public final class CraftingSessions {
             var candidate = new org.berusted.craftable.environment.BrowsingSnapshot(session, recipeVersion, Math.incrementExact(version),
                     recipes.workbench(), recipes.limitedCrafting(), recipes.unlockedRecipes(),
                     rules.surplusDelivery() == CraftableServerConfig.SurplusDelivery.DROP_OVERFLOW, rules.partialPolicy(),
-                    rules.maxBatches(), player.getInventory().getMaxStackSize(),
+                    rules.maxBatches(), rules.maxPlanSteps(), rules.directPreparation(), player.getInventory().getMaxStackSize(),
                     MainInventoryInsertion.copyMainInventory(player.getInventory()), inputs);
             // Include empty endpoints/permission boundaries in the private
             // identity too. Time, scan number and current player position are

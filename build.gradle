@@ -61,7 +61,7 @@ runs {
         // Recommended logging level for the console
         // You can set various levels here.
         // Please read: https://stackoverflow.com/questions/2031163/when-to-use-the-different-log-levels
-        systemProperty 'forge.logging.console.level', 'warn'
+        systemProperty 'forge.logging.console.level', 'debug'
 
         workingDirectory project.layout.projectDirectory.dir('run').dir(name)
 
@@ -72,6 +72,11 @@ runs {
         if (project.hasProperty('m3Smoke') || project.hasProperty('m4Smoke')) {
             modSource project.sourceSets.m3ClientTest
             systemProperty(project.hasProperty('m4Smoke') ? 'craftable.m4Smoke' : 'craftable.m3Smoke', 'true')
+            // A focused filter within the same client harness, not full M4 evidence.
+            if (project.hasProperty('preM5Only')) systemProperty 'craftable.preM5Only', 'true'
+            // Opt-in lease regression; ordinary planning never injects lease state.
+            if (project.hasProperty('stage7ConfirmAudit')) systemProperty 'craftable.stage7ConfirmAudit', 'true'
+            if (project.hasProperty('witnessTiming')) systemProperty 'craftable.witnessTiming', 'true'
         }
         // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
         systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id

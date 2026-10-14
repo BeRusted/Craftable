@@ -338,7 +338,12 @@ public final class CraftingPlanOverlay extends Screen {
             }
         }
         if (pending != null) {
-            if (pending != Work.CONFIRM && pending != Work.AUTHORIZE && pending != Work.FALLBACK) return;
+            if (pending != Work.CONFIRM && pending != Work.AUTHORIZE && pending != Work.FALLBACK) {
+                // Read-only work may wait across lease expiry/renewal. Keep
+                // the displayed action current without dispatching more work.
+                controls();
+                return;
+            }
             if (System.nanoTime() - sentAt < 5_000_000_000L) return;
             boolean wasConfirm = pending == Work.CONFIRM || pending == Work.AUTHORIZE || pending == Work.FALLBACK;
             pending = null; inFlight = -1;
@@ -368,7 +373,12 @@ public final class CraftingPlanOverlay extends Screen {
         unavailableSince = 0;
         // The latest explicit intent is local read-only work. Do not leave it
         // behind an earlier MAX/card cadence after releasing the slider.
-        if (!dirty && System.nanoTime() - sentAt < 200_000_000L) return;
+        if (!dirty && System.nanoTime() - sentAt < 200_000_000L) {
+            // Work cadence must not delay a renewed lease's UI state. The
+            // existing ready/result/authority gates remain in force.
+            controls();
+            return;
+        }
         if (dirty && System.nanoTime() - changedAt >= 150_000_000L) {
             dirty = false;
             ClientBrowsePlanner.preview(begin(Work.PREVIEW), intent, choicePath);

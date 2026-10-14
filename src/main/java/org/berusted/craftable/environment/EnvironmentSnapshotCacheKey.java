@@ -16,6 +16,7 @@ record EnvironmentSnapshotCacheKey(
     boolean canReuse(EnvironmentSnapshot snapshot, long currentGameTime) {
         long age = currentGameTime - snapshot.capturedGameTime();
         return dimension.equals(snapshot.dimension().location())
+                && settings.previewCacheTicks() > 0
                 && origin.equals(snapshot.origin())
                 && settings.equals(snapshot.scanSettings())
                 && age >= 0

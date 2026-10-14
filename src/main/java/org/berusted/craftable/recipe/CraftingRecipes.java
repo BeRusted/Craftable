@@ -35,6 +35,8 @@ import net.minecraft.world.level.GameRules;
 import net.neoforged.neoforge.common.CommonHooks;
 import org.berusted.craftable.api.CraftingResultCode;
 import org.berusted.craftable.planner.CraftPlan;
+import org.berusted.craftable.config.DirectPreparationPolicy;
+import org.berusted.craftable.config.CraftableServerConfig;
 
 /** Ordinary vanilla recipe boundary. Each index belongs to its owning game thread;
  * execution and crafting hooks remain exclusively on the server thread. */
@@ -46,10 +48,16 @@ public final class CraftingRecipes {
     private final Set<ResourceLocation> unlocked;
     private final boolean limited;
     private final Index index;
+    private final DirectPreparationPolicy directPreparation;
 
     public CraftingRecipes(ServerPlayer player, boolean workbench) {
+        this(player, workbench, CraftableServerConfig.directPreparationPolicy());
+    }
+
+    public CraftingRecipes(ServerPlayer player, boolean workbench, DirectPreparationPolicy directPreparation) {
         this.player = player;
         this.workbench = workbench;
+        this.directPreparation = java.util.Objects.requireNonNull(directPreparation, "directPreparation");
         this.limited = player.serverLevel().getGameRules().getBoolean(GameRules.RULE_LIMITED_CRAFTING);
         var server = player.getServer();
         var manager = server.getRecipeManager();
@@ -145,7 +153,10 @@ public final class CraftingRecipes {
     public Set<ResourceLocation> unlockedRecipes() { return Set.copyOf(unlocked); }
     public Entry find(ResourceLocation id) { return index.byId.get(id); }
     public List<Entry> entries() { return index.ordered; }
-    public PlanningInput planningInput() { return new PlanningInput(index, workbench, limited, unlocked); }
+    public PlanningInput planningInput() { return new PlanningInput(index, workbench, limited, unlocked, directPreparation); }
+    public boolean allowDirectPreparation(Entry entry) {
+        return entry != null && directPreparation.allowsWithoutConfirmation(entry.id(), entry.safePreparation());
+    }
 
     /** Validate the chosen route against live authoritative behavior, never
      * search an alternative here. The pure model cannot authorize execution. */
@@ -208,6 +219,12 @@ public final class CraftingRecipes {
     }
 
     public CraftPlan.Step assemble(Entry entry, String path, List<ItemStack> grid) {
+        return assemble(entry, path, grid, java.util.Collections.nCopies(grid.size(), -1));
+    }
+
+    /** Preserve replay provenance in the already copied authoritative step.
+     * Origins do not replace live recipe matching, assembly or remainder checks. */
+    public CraftPlan.Step assemble(Entry entry, String path, List<ItemStack> grid, List<Integer> origins) {
         CraftingInput input = CraftingInput.of(entry.gridSize(), entry.gridSize(), CraftPlan.copies(grid));
         var recipe = entry.holder().value();
         if (!recipe.matches(input, player.serverLevel())) return null;
@@ -223,7 +240,7 @@ public final class CraftingRecipes {
             CommonHooks.setCraftingPlayer(null);
         }
         if (remainders.size() != input.size()) return null;
-        return new CraftPlan.Step(entry.holder(), path, entry.gridSize(), grid, output, remainders);
+        return new CraftPlan.Step(entry.holder(), path, entry.gridSize(), grid, output, remainders, origins);
     }
 
     public static boolean protectedStack(ItemStack stack) {

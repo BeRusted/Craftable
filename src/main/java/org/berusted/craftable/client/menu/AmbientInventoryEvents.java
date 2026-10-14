@@ -1,21 +1,25 @@
 package org.berusted.craftable.client.menu;
 
+import java.util.List;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.components.events.ContainerEventHandler;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
-import net.minecraft.client.gui.screens.options.OptionsScreen;
+import net.minecraft.client.gui.screens.options.AccessibilityOptionsScreen;
 import net.minecraft.network.chat.Component;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.berusted.craftable.Craftable;
 import org.berusted.craftable.client.ClientRequestSequence;
+import org.berusted.craftable.client.mixin.OptionsListEntryAccessor;
 import org.berusted.craftable.config.CraftableClientConfig;
 import org.berusted.craftable.network.OpenInventoryRequestPayload;
 import org.berusted.craftable.config.EnvironmentScanSettings;
@@ -117,17 +121,44 @@ public final class AmbientInventoryEvents {
         Screen screen = event.getScreen();
         if (CraftableClientConfig.recipeBookEnhancementsEnabled() && screen instanceof InventoryScreen
                 && org.berusted.craftable.client.recipebook.RecipeBookProjection.modeAllowed()) request(screen);
-        if (screen instanceof OptionsScreen) {
-            event.addListener(Button.builder(Component.literal("Craftable"), b -> {
-                var container = ModList.get().getModContainerById(Craftable.MOD_ID).orElseThrow();
-                Minecraft.getInstance().setScreen(new net.neoforged.neoforge.client.gui.ConfigurationScreen(container, screen));
-            }).bounds(screen.width - 104, 6, 98, 20).tooltip(Tooltip.create(ruleSummary())).build());
+        if (screen instanceof AccessibilityOptionsScreen) {
+            event.getListenersList().stream().filter(OptionsList.class::isInstance).map(OptionsList.class::cast)
+                    .findFirst().ifPresent(list -> appendSettingsButton(screen, list));
+        }
+    }
+
+    public static void appendSettingsButton(Screen parent, OptionsList list) {
+        var rows = ((ContainerEventHandler) list).children();
+        boolean added = rows.stream().map(entry -> (ContainerEventHandler) entry)
+                .flatMap(entry -> entry.children().stream()).anyMatch(SettingsButton.class::isInstance);
+        if (added) return;
+        var button = new SettingsButton(parent);
+        if (!rows.isEmpty()) {
+            var last = (ContainerEventHandler) rows.getLast();
+            var widgets = last.children();
+            // A lone full-width control is not an empty right-hand slot.
+            // Keep the original row (including OptionEntry's option mappings).
+            if (widgets.size() == 1 && widgets.getFirst() instanceof AbstractWidget left && left.getWidth() <= 150) {
+                ((OptionsListEntryAccessor) last).craftable$setWidgets(List.of(left, button));
+                return;
+            }
+        }
+        // The native list owns scrolling, clipping, focus and resize. Never
+        // also register this nested button as a top-level screen widget.
+        list.addSmall(button, null);
+    }
+
+    private static final class SettingsButton extends Button {
+        SettingsButton(Screen parent) {
+            super(0, 0, 150, 20, Component.translatable("mod.craftable.name"), button -> Minecraft.getInstance()
+                    .setScreen(new org.berusted.craftable.client.CraftableSettingsScreen(parent)), DEFAULT_NARRATION);
+            setTooltip(Tooltip.create(Component.translatable("screen.craftable.settings.title")));
         }
     }
 
     public static Component ruleSummary() {
         return rules == null ? Component.translatable("tooltip.craftable.rules_unknown")
                 : Component.translatable("tooltip.craftable.rules", rules.horizontalRadius(), rules.verticalRadius(),
-                    rules.previewCacheTicks(), Component.translatable(rules.includeEnderChest() ? "options.on" : "options.off"));
+                    Component.translatable(rules.includeEnderChest() ? "options.on" : "options.off"));
     }
 }

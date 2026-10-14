@@ -16,10 +16,15 @@ public final class MainInventoryInsertion {
     private MainInventoryInsertion() {}
 
     static Delivery simulate(Inventory inventory, CraftPlan plan, EnvironmentSnapshot snapshot, boolean allowDrops) {
-        return simulate(copyMainInventory(inventory), inventory.getMaxStackSize(), plan,
-                snapshot.endpoints().stream().filter(e -> e.kind() == EndpointKind.PLAYER)
-                        .map(e -> e.id()).collect(java.util.stream.Collectors.toSet()),
-                snapshot.endpoints().stream().map(e -> e.id()).collect(java.util.stream.Collectors.toSet()), allowDrops);
+        var mainSlots = copyMainInventory(inventory);
+        int maximum = inventory.getMaxStackSize();
+        var playerEndpoints = new java.util.HashSet<String>();
+        var endpoints = new java.util.HashSet<String>();
+        for (var endpoint : snapshot.endpoints()) {
+            endpoints.add(endpoint.id());
+            if (endpoint.kind() == EndpointKind.PLAYER) playerEndpoints.add(endpoint.id());
+        }
+        return simulate(mainSlots, maximum, plan, playerEndpoints, endpoints, allowDrops);
     }
 
     /** Preview and commit share the same capacity arithmetic. The preview

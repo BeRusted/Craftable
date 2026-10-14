@@ -114,7 +114,10 @@ public final class ResourceLedger {
 
     public int produce(ItemStack stack, boolean terminal, boolean remainder, String path, int origin) {
         if (stack.isEmpty()) return -1;
-        if (generated.size() >= SearchBudget.MAX_STEPS * 10) throw new IllegalStateException("Generated lot limit");
+        // One output and at most nine remainders per represented step. Runtime
+        // limits are enforced by search/replay; this independent bound also
+        // protects standalone ledgers and never increases their memory budget.
+        if (generated.size() >= SearchBudget.HARD_MAX_STEPS * 10) throw new IllegalStateException("Generated lot limit");
         generated.add(new Lot(stack.copyWithCount(1), stack.getCount(), 0, terminal, terminal, remainder, path, origin));
         return generated.size() - 1;
     }

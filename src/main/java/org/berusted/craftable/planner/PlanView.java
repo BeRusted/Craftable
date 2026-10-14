@@ -23,6 +23,7 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
     public static final int MAX_NODES = 256;
     public static final int MAX_MISSING = 32;
     private static final int MAX_ALTERNATIVE_OPTIONS = 16_384;
+    private static final java.util.regex.Pattern DISPLAY_PATH = java.util.regex.Pattern.compile("0(?:\\.[0-8]){0,12}");
 
     public PlanView {
         nodes = List.copyOf(nodes);
@@ -32,7 +33,7 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
         surplus = CraftPlan.copies(surplus);
         drops = CraftPlan.copies(drops);
         missing = List.copyOf(missing);
-        if (nodes.size() > MAX_NODES || operations.size() > SearchBudget.MAX_STEPS || missing.size() > MAX_MISSING)
+        if (nodes.size() > MAX_NODES || operations.size() > SearchBudget.HARD_MAX_STEPS || missing.size() > MAX_MISSING)
             throw new IllegalArgumentException("Oversized plan view");
         for (int i = 0; i < operations.size(); i++)
             for (int origin : operations.get(i).inputOrigins())
@@ -73,11 +74,13 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
      * workstation/lock verdict is not a proof of global material availability;
      * selecting it must replan the whole request through CraftingService. */
     public Choices choices(CraftingRecipes catalog, CraftRequest request, String path) {
+        if ("".equals(path)) return new Choices(List.of(), false);
         return choices(catalog.planningInput(), request, path);
     }
 
     public Choices choices(PlanningInput catalog, CraftRequest request, String path) {
-        var displayed = nodes.stream().filter(n -> n.path().equals(path)).findFirst().orElse(null);
+        Node displayed = null;
+        for (var node : nodes) if (node.path().equals(path)) { displayed = node; break; }
         if (displayed == null) return new Choices(List.of(), false);
         var found = new java.util.TreeMap<ResourceLocation, CraftingRecipes.Entry>();
         if (path.equals("0")) {
@@ -105,9 +108,9 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
     public record Node(String path, List<ItemStack> needs, List<ItemStack> made,
             List<ResourceLocation> recipes, boolean explanation, boolean alternatives, String reference) {
         public Node {
-            if (!path.matches("0(?:\\.[0-8]){0,12}") || needs.size() > 16 || made.size() > 16 || recipes.size() > 16)
+            if (!DISPLAY_PATH.matcher(path).matches() || needs.size() > 16 || made.size() > 16 || recipes.size() > 16)
                 throw new IllegalArgumentException("Invalid display node");
-            if (!reference.isEmpty() && (!reference.matches("0(?:\\.[0-8]){0,12}") || reference.equals(path)))
+            if (!reference.isEmpty() && (!DISPLAY_PATH.matcher(reference).matches() || reference.equals(path)))
                 throw new IllegalArgumentException("Invalid display reference");
             needs = CraftPlan.copies(needs);
             made = CraftPlan.copies(made);
@@ -170,7 +173,7 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
             ItemStack output, List<ItemStack> remainders, List<Integer> inputOrigins) {
         public Operation {
             if (inputs.size() > 9 || inputOrigins.size() != inputs.size() || remainders.size() > 9 || output.isEmpty()
-                    || !path.matches("0(?:\\.[0-8]){0,12}"))
+                    || !DISPLAY_PATH.matcher(path).matches())
                 throw new IllegalArgumentException("Invalid displayed operation");
             inputs = CraftPlan.copies(inputs);
             output = output.copy();
@@ -196,6 +199,16 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
      * It never creates execution authority or calls a live recipe hook. */
     public static PlanView from(PlanningInput catalog, CraftRequest request, SearchResult result,
             List<ItemStack> drops, List<ItemStack> available) {
+        try { return project(catalog, request, result, drops, available); }
+        catch (ArithmeticException oversized) {
+            // Display counts may aggregate many sources or hypothetical batches.
+            // Never wrap them into a complete review that could offer a token.
+            return limited(catalog);
+        }
+    }
+
+    private static PlanView project(PlanningInput catalog, CraftRequest request, SearchResult result,
+            List<ItemStack> drops, List<ItemStack> available) {
         var nodes = new LinkedHashMap<String, MutableNode>();
         var operations = new ArrayList<Operation>();
         var consumed = new ArrayList<ItemStack>();
@@ -206,9 +219,11 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
                 if (node == null) return limited(catalog);
                 node.actual = true;
                 node.fixed = true;
-                ResourceLedger.merge(node.made, step.output());
-                ResourceLedger.merge(node.remaining, step.output());
-                step.remainders().forEach(s -> ResourceLedger.merge(node.remaining, s));
+                var output = step.output();
+                var remainders = step.remainders();
+                ResourceLedger.merge(node.made, output);
+                ResourceLedger.merge(node.remaining, output);
+                for (var remainder : remainders) ResourceLedger.merge(node.remaining, remainder);
                 if (!node.recipes.contains(step.recipe().id())) node.recipes.add(step.recipe().id());
                 var inputs = step.inputs();
                 for (int slot = 0; slot < inputs.size(); slot++) {
@@ -219,15 +234,23 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
                     child.fixed = true;
                     ResourceLedger.merge(child.needs, inputs.get(slot));
                 }
-                operations.add(new Operation(step.recipe().id(), step.path(), inputs, step.output(), step.remainders(), step.inputOrigins()));
+                operations.add(new Operation(step.recipe().id(), step.path(), inputs, output, remainders, step.inputOrigins()));
             }
             // Remaining generated quantities come from actual step references,
             // not a guess based on equal icons. Explanation can share this
             // frontier, but cannot invent extra copies or execution steps.
-            for (var op : operations) for (int slot = 0; slot < op.inputs().size(); slot++) {
-                int origin = op.inputOrigins().get(slot);
-                if (origin >= 0) takeStock(nodes.get(operations.get(origin).path()).remaining,
-                        net.minecraft.world.item.crafting.Ingredient.of(op.inputs().get(slot)), op.inputs().get(slot).getCount());
+            for (var op : operations) {
+                var inputs = op.inputs();
+                var origins = op.inputOrigins();
+                for (int slot = 0; slot < inputs.size(); slot++) {
+                    int origin = origins.get(slot);
+                    if (origin >= 0) {
+                        var input = inputs.get(slot);
+                        int count = input.getCount();
+                        takeStock(nodes.get(operations.get(origin).path()).remaining,
+                                net.minecraft.world.item.crafting.Ingredient.of(input), count);
+                    }
+                }
             }
             for (var extraction : plan.extractions())
                 ResourceLedger.merge(consumed, extraction.expected().copyWithCount(extraction.count()));
@@ -236,7 +259,8 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
         if (root != null && catalog.unavailable(root) != CraftingResultCode.UNSUPPORTED_RECIPE) {
             var node = node(nodes, "0");
             if (node == null) return limited(catalog);
-            ResourceLedger.merge(node.needs, root.output().copyWithCount(root.output().getCount() * request.batches()));
+            ResourceLedger.merge(node.needs, root.output().copyWithCount(
+                    Math.multiplyExact(root.output().getCount(), request.batches())));
             // A blocked root is still explainable. Do not multiply a made-up
             // chain into actual costs: only the ordered plan contributes those.
             if (!node.actual) {
@@ -248,11 +272,17 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
                     return limited(catalog);
             }
         }
-        if (result.missing().size() > MAX_MISSING || nodes.values().stream().anyMatch(n ->
-                n.needs.size() > 16 || n.made.size() > 16 || n.recipes.size() > 16)) return limited(catalog);
+        if (result.missing().size() > MAX_MISSING) return limited(catalog);
+        for (var node : nodes.values())
+            if (node.needs.size() > 16 || node.made.size() > 16 || node.recipes.size() > 16) return limited(catalog);
+        var projectedNodes = new ArrayList<Node>(nodes.size());
+        for (var entry : nodes.entrySet()) {
+            var value = entry.getValue();
+            projectedNodes.add(new Node(entry.getKey(), value.needs, value.made, value.recipes,
+                    !value.actual, value.alternatives, value.reference));
+        }
         return new PlanView(result.code(), catalog.workbench(), true, plan == null ? 0 : plan.completedBatches(),
-                nodes.entrySet().stream().map(e -> new Node(e.getKey(), e.getValue().needs, e.getValue().made,
-                        e.getValue().recipes, !e.getValue().actual, e.getValue().alternatives, e.getValue().reference)).toList(),
+                projectedNodes,
                 operations, consumed, plan == null ? List.of() : plan.primary(),
                 plan == null ? List.of() : plan.surplus(), drops, result.missing());
     }
@@ -276,7 +306,7 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
             // This routine only accounts for the displayed, selected route.
             // Hypothetical output is never an operation, extraction or stock
             // authorization. Repeated visits add demand, not another full batch.
-            child.demanded += batches;
+            child.demanded = Math.addExact(child.demanded, batches);
             child.alternatives = true;
             child.needs.clear();
             child.needs.addAll(java.util.Arrays.stream(requirement.ingredient().getItems()).limit(16)
@@ -293,10 +323,10 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
                 }
             }
             if (shared) continue;
-            int inStock = stock.stream().filter(requirement.ingredient()::test).mapToInt(ItemStack::getCount).sum();
-            var existing = takeStock(stock, requirement.ingredient(), Math.min(batches, inStock));
+            long inStock = count(stock, requirement.ingredient());
+            var existing = takeStock(stock, requirement.ingredient(), Math.toIntExact(Math.min(batches, inStock)));
             existing.forEach(s -> ResourceLedger.merge(child.available, s));
-            int deficit = batches - existing.stream().mapToInt(ItemStack::getCount).sum();
+            int deficit = Math.toIntExact((long) batches - count(existing));
             if (deficit == 0 && child.hypothetical == null && child.reference.isEmpty()) {
                 child.needs.clear(); child.needs.addAll(CraftPlan.copies(child.available));
                 child.alternatives = false; child.actual = true;
@@ -335,20 +365,25 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
                 // an oak icon after the player selected birch planks.
                 child.needs.clear();
                 child.available.forEach(s -> ResourceLedger.merge(child.needs, s));
-                int needed = child.demanded - child.available.stream().mapToInt(ItemStack::getCount).sum();
-                if (needed > 0) ResourceLedger.merge(child.needs, producer.output().copyWithCount(needed));
+                long needed = (long) child.demanded - count(child.available);
+                if (needed > 0) ResourceLedger.merge(child.needs, producer.output().copyWithCount(Math.toIntExact(needed)));
                 child.alternatives = false;
                 String sourcePath = supply == null ? childPath : supply.getKey();
                 var source = supply == null ? child : supply.getValue();
                 source.hypothetical = producer;
-                int remaining = source.remaining.stream().filter(requirement.ingredient()::test).mapToInt(ItemStack::getCount).sum();
-                int upstreamBatches = (Math.max(0, deficit - remaining) + producer.output().getCount() - 1) / producer.output().getCount();
+                long remaining = count(source.remaining, requirement.ingredient());
+                long requiredBatches = (Math.max(0L, (long) deficit - remaining)
+                        + producer.output().getCount() - 1L) / producer.output().getCount();
+                // Explanatory work has a fixed representation bound, not a
+                // grant to execute under a world's possibly smaller step cap.
+                if (requiredBatches > SearchBudget.HARD_MAX_STEPS - source.hypotheticalBatches) return false;
+                int upstreamBatches = Math.toIntExact(requiredBatches);
                 if (upstreamBatches > 0) {
-                    source.hypotheticalBatches += upstreamBatches;
-                    if (source.hypotheticalBatches > SearchBudget.MAX_STEPS) return false;
+                    source.hypotheticalBatches = Math.addExact(source.hypotheticalBatches, upstreamBatches);
                     if (!explain(catalog, request, nodes, producer, sourcePath, active,
                             sourcePath.split("\\.").length - 1, stock, upstreamBatches)) return false;
-                    ResourceLedger.merge(source.remaining, producer.output().copyWithCount(upstreamBatches * producer.output().getCount()));
+                    ResourceLedger.merge(source.remaining, producer.output().copyWithCount(
+                            Math.multiplyExact(upstreamBatches, producer.output().getCount())));
                 }
                 takeStock(source.remaining, requirement.ingredient(), deficit);
                 if (supply != null) child.reference = sourcePath;
@@ -397,7 +432,7 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
     }
 
     private static List<ItemStack> takeStock(List<ItemStack> stock, net.minecraft.world.item.crafting.Ingredient ingredient, int count) {
-        if (stock.stream().filter(ingredient::test).mapToInt(ItemStack::getCount).sum() < count) return List.of();
+        if (count(stock, ingredient) < count) return List.of();
         var used = new ArrayList<ItemStack>();
         for (var stack : stock) if (!stack.isEmpty() && ingredient.test(stack)) {
             int taken = Math.min(count, stack.getCount());
@@ -405,6 +440,14 @@ public record PlanView(CraftingResultCode code, boolean workbench, boolean compl
             ResourceLedger.merge(used, stack.copyWithCount(taken)); stack.shrink(taken); count -= taken;
         }
         return used;
+    }
+
+    private static long count(List<ItemStack> stacks) {
+        return stacks.stream().mapToLong(ItemStack::getCount).sum();
+    }
+
+    private static long count(List<ItemStack> stacks, net.minecraft.world.item.crafting.Ingredient ingredient) {
+        return stacks.stream().filter(ingredient::test).mapToLong(ItemStack::getCount).sum();
     }
 
     public static PlanView failed(CraftingResultCode code) {
